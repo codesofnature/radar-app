@@ -5,12 +5,26 @@ import base64
 import concurrent.futures
 import math
 import json
-from datetime import datetime, timedelta
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 # --- Page Config ---
 st.set_page_config(page_title="Instant Radar Flipbook", layout="wide", page_icon="⚡")
 
 # --- Configuration ---
+# Set your target local timezone here (Handles DST automatically)
+LOCAL_TZ = ZoneInfo("America/New_York")
+
+# --- STATIC SERVING WORKAROUND (Fixes Base64 Bloat) ---
+# To use this: set USE_STATIC_SERVING = True 
+# AND run your app with: streamlit run noaa.py --server.enableStaticServing=true
+USE_STATIC_SERVING = False 
+STATIC_DIR = "static/radar_frames"
+if USE_STATIC_SERVING:
+    os.makedirs(STATIC_DIR, exist_ok=True)
+
 BBOX = "-14200000,2700000,-7200000,6400000"
 WIDTH = 1200
 HEIGHT = 650
@@ -40,36 +54,48 @@ def get_model_init_time():
         res = requests.get('https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json', timeout=5)
         dt_str = res.json()['model_init_utc']
         if not dt_str.endswith('Z'): dt_str += 'Z'
-        return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ")
-    except:
-        now = datetime.utcnow()
+        return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except Exception as e:
+        print(f"Error fetching model init time: {e}")
+        now = datetime.now(timezone.utc)
         return now.replace(minute=0, second=0, microsecond=0)
 
-def fetch_single_image(url):
+def fetch_single_image(u_info):
+    frame_time, time_str, url = u_info
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
-            return base64.b64encode(resp.content).decode('utf-8')
-    except:
-        pass
+            if USE_STATIC_SERVING:
+                filename = f"frame_{int(frame_time.timestamp())}.png"
+                filepath = os.path.join(STATIC_DIR, filename)
+                with open(filepath, "wb") as f:
+                    f.write(resp.content)
+                # Streamlit statically serves the 'static' folder at '/app/static/'
+                return f"app/static/radar_frames/{filename}"
+            else:
+                b64_str = base64.b64encode(resp.content).decode('utf-8')
+                return f"data:image/png;base64,{b64_str}"
+    except Exception as e:
+        print(f"Error fetching WMS image from {url}: {e}")
     return None
 
 @st.cache_data(ttl=300) 
 def build_flipbook_assets():
     init_time = get_model_init_time()
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
-    tz_offset = timedelta(hours=4)
     frames_data = []
     
     live_wms_url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0q-900913&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&SRS=EPSG:3857&BBOX={BBOX}"
-    live_b64 = fetch_single_image(live_wms_url)
-    if live_b64:
-        local_now = now - tz_offset 
+    
+    live_info = (now, now.astimezone(LOCAL_TZ).strftime("🔴 USA NEXRAD: %A, %I:%M %p"), live_wms_url)
+    live_img_src = fetch_single_image(live_info)
+    
+    if live_img_src:
         frames_data.append({
             "dt": now, 
-            "time": local_now.strftime("🔴 USA NEXRAD: %A, %I:%M %p"), 
-            "img": live_b64
+            "time": live_info[1], 
+            "img": live_img_src
         })
 
     for attempt in range(3):
@@ -81,17 +107,17 @@ def build_flipbook_assets():
             if frame_time > now:
                 layer_name = f"refd_{str(mins_offset).zfill(4)}"
                 url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer_name}&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&CRS=EPSG:3857&BBOX={BBOX}"
-                local_frame_time = frame_time - tz_offset
+                local_frame_time = frame_time.astimezone(LOCAL_TZ)
                 time_str = local_frame_time.strftime("🔮 USA HRRR: %A, %I:%M %p")
                 urls_to_fetch.append((frame_time, time_str, url))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            future_to_url = {executor.submit(fetch_single_image, u[2]): u for u in urls_to_fetch}
+            future_to_url = {executor.submit(fetch_single_image, u): u for u in urls_to_fetch}
             for future in concurrent.futures.as_completed(future_to_url):
                 u_info = future_to_url[future]
-                b64_data = future.result()
-                if b64_data:
-                    hrrr_frames.append({"dt": u_info[0], "time": u_info[1], "img": b64_data})
+                img_src = future.result()
+                if img_src:
+                    hrrr_frames.append({"dt": u_info[0], "time": u_info[1], "img": img_src})
         
         if len(hrrr_frames) > 5: 
             hrrr_frames.sort(key=lambda x: x["dt"])
@@ -114,7 +140,7 @@ def fetch_and_build_temp_grid(target_dts):
             lon = -180 + (360 * c / cols)
             points.append({"lat": round(lat, 2), "lon": round(lon, 2)})
             
-    chunk_size = 200
+    chunk_size = 90
     all_hourly_data = []
     
     for i in range(0, len(points), chunk_size):
@@ -129,7 +155,11 @@ def fetch_and_build_temp_grid(target_dts):
             if not isinstance(data, list): data = [data]
             all_hourly_data.extend(data)
         except Exception as e:
+            print(f"Error fetching Open-Meteo chunk {i}: {e}")
             all_hourly_data.extend([{} for _ in chunk])
+            
+        # Pacing delay to avoid triggering Open-Meteo API free-tier limits
+        time.sleep(0.25)
 
     frames_grids = []
     for target_dt in target_dts:
@@ -140,7 +170,7 @@ def fetch_and_build_temp_grid(target_dts):
                 hourly = all_hourly_data[i].get('hourly', None)
                 if not hourly: continue
                 
-                times_ts = [datetime.strptime(t, "%Y-%m-%dT%H:%M").timestamp() for t in hourly['time']]
+                times_ts = [datetime.strptime(t, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc).timestamp() for t in hourly['time']]
                 temps = hourly['temperature_2m']
                 
                 temp_val = None
@@ -156,7 +186,7 @@ def fetch_and_build_temp_grid(target_dts):
                             break
                 if temp_val is not None:
                     grid.append({"lat": point['lat'], "lon": point['lon'], "t": int(round(temp_val))})
-            except:
+            except Exception:
                 pass
         frames_grids.append(grid)
     return frames_grids
@@ -173,7 +203,8 @@ if not radar_frames:
     st.error("Failed to connect to WMS servers after multiple fallbacks. NOAA servers may be down.")
     st.stop()
 
-js_frames_array = ",\n".join([f"{{ ts: {int(f['dt'].timestamp())}, time: '{f['time']}', img: 'data:image/png;base64,{f['img']}', grid: {json.dumps(f.get('grid', []))} }}" for f in radar_frames])
+# Build the JS Array Payload. Notice `f['img']` injects either Base64 or the static URL natively now.
+js_frames_array = ",\n".join([f"{{ ts: {int(f['dt'].timestamp())}, time: '{f['time']}', img: '{f['img']}', grid: {json.dumps(f.get('grid', []))} }}" for f in radar_frames])
 
 html_code = f"""
 <!DOCTYPE html>
@@ -195,7 +226,24 @@ html_code = f"""
         .radar-blend {{ mix-blend-mode: multiply; }} 
         body.dark-theme .radar-blend {{ mix-blend-mode: screen; }} 
         
-        .temp-point {{ font-weight: 800; font-size: 8px; letter-spacing: -0.5px; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000, 0px 2px 4px rgba(0,0,0,0.6); text-align: center; white-space: nowrap; margin-left: -10px; margin-top: -10px;}}
+        /* NEW STYLES: Shaded Colored Circles for Temperatures */
+        .temp-point {{ 
+            width: 24px; 
+            height: 24px; 
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-weight: 700; 
+            font-size: 11px; 
+            letter-spacing: -0.5px;
+            color: #0f172a; 
+            box-shadow: 0 3px 6px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.6); 
+            border: 1px solid rgba(0,0,0,0.15);
+            margin-left: -12px; 
+            margin-top: -12px; 
+        }}
         
         #controls-wrapper {{ background: #ffffff; color: #1e293b; padding: 10px 20px; border-radius: 12px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: row; align-items: center; gap: 15px; border: 1px solid #e2e8f0; transition: all 0.3s; flex-wrap: wrap; justify-content: center;}}
         body.dark-theme #controls-wrapper {{ background: #1e293b; color: #f8fafc; border-color: #334155; }}
@@ -298,7 +346,6 @@ html_code = f"""
         }};
         basemaps.light.addTo(map);
 
-        // DOUBLE BUFFERING: Two layers for HRRR to prevent flicker
         let hrrrLayers = [
             L.imageOverlay('', hrrrBounds, {{pane: 'hrrrPane', opacity: 0.85, interactive: false}}).addTo(map),
             L.imageOverlay('', hrrrBounds, {{pane: 'hrrrPane', opacity: 0, interactive: false}}).addTo(map)
@@ -326,7 +373,6 @@ html_code = f"""
             }});
         }}
 
-        // --- Fetch Rainviewer & Initialize All Layers ---
         fetch('https://api.rainviewer.com/public/weather-maps.json')
             .then(res => res.json())
             .then(data => {{
@@ -335,7 +381,6 @@ html_code = f"""
                     time: f.time
                 }}));
                 
-                // PRE-INITIALIZE ALL GLOBAL FRAMES at opacity 0 to force background tile fetching
                 rainviewerFrames.forEach((frame, idx) => {{
                     rainviewerLayers[idx] = new L.RainviewerCanvasLayer({{
                         urlBase: frame.urlBase,
@@ -350,7 +395,6 @@ html_code = f"""
             }})
             .catch(e => console.log("Rainviewer fetch failed", e));
         
-        // --- Core Filter Logic ---
         function applyColorFilter(ctx, width, height) {{
             if (activeFilter === 'none') return;
             let imgData = ctx.getImageData(0, 0, width, height);
@@ -472,7 +516,6 @@ html_code = f"""
         function drawGlobalFrame(targetIdx) {{
             if (targetIdx === lastDrawnRvIdx) return;
             
-            // DOUBLE BUFFERING: Keep previous layer visible underneath until current loads
             for (const [key, layer] of Object.entries(rainviewerLayers)) {{
                 let k = parseInt(key);
                 if (k === targetIdx) {{
@@ -500,7 +543,6 @@ html_code = f"""
             if (!frames[index]) return;
             let targetTs = frames[index].ts;
             
-            // Update HRRR Layer Safely
             getFilteredHrrrImage(index, (url) => {{
                 setHrrrOverlay(url);
             }});
@@ -536,7 +578,9 @@ html_code = f"""
                     let color = getTempColor(pt.t);
                     let icon = L.divIcon({{
                         className: 'custom-temp',
-                        html: `<div class="temp-point" style="color: ${{color}}">${{pt.t}}&deg;</div>`
+                        iconSize: null,
+                        /* NEW LOGIC: Dynamic background color with 90% opacity (E6) */
+                        html: `<div class="temp-point" style="background-color: ${{color}}E6;">${{pt.t}}</div>`
                     }});
                     L.marker([pt.lat, pt.lon], {{icon: icon, interactive: false}}).addTo(tempLayerGroup);
                 }});
