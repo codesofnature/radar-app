@@ -4,26 +4,14 @@ import requests
 import base64
 import concurrent.futures
 import math
-import json
-import os
-import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 # --- Page Config ---
 st.set_page_config(page_title="Instant Radar Flipbook", layout="wide", page_icon="⚡")
 
-# --- Configuration ---
-# Set your target local timezone here (Handles DST automatically)
+# Set your target local timezone here
 LOCAL_TZ = ZoneInfo("America/New_York")
-
-# --- STATIC SERVING WORKAROUND (Fixes Base64 Bloat) ---
-# To use this: set USE_STATIC_SERVING = True 
-# AND run your app with: streamlit run noaa.py --server.enableStaticServing=true
-USE_STATIC_SERVING = False 
-STATIC_DIR = "static/radar_frames"
-if USE_STATIC_SERVING:
-    os.makedirs(STATIC_DIR, exist_ok=True)
 
 BBOX = "-14200000,2700000,-7200000,6400000"
 WIDTH = 1200
@@ -34,7 +22,6 @@ RADAR_W = int(WIDTH * RADAR_RES_FACTOR)
 RADAR_H = int(HEIGHT * RADAR_RES_FACTOR)
 
 MINUTES_OFFSETS = list(range(0, 18 * 60, 15)) + list(range(18 * 60, 49 * 60, 60))
-TOTAL_FRAMES = len(MINUTES_OFFSETS)
 
 def mercator_to_latlon(x, y):
     r = 6378137.0
@@ -65,18 +52,10 @@ def fetch_single_image(u_info):
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
-            if USE_STATIC_SERVING:
-                filename = f"frame_{int(frame_time.timestamp())}.png"
-                filepath = os.path.join(STATIC_DIR, filename)
-                with open(filepath, "wb") as f:
-                    f.write(resp.content)
-                # Streamlit statically serves the 'static' folder at '/app/static/'
-                return f"app/static/radar_frames/{filename}"
-            else:
-                b64_str = base64.b64encode(resp.content).decode('utf-8')
-                return f"data:image/png;base64,{b64_str}"
+            b64_str = base64.b64encode(resp.content).decode('utf-8')
+            return f"data:image/png;base64,{b64_str}"
     except Exception as e:
-        print(f"Error fetching WMS image from {url}: {e}")
+        print(f"Error fetching WMS image: {e}")
     return None
 
 @st.cache_data(ttl=300) 
@@ -129,89 +108,22 @@ def build_flipbook_assets():
         
     return frames_data
 
-@st.cache_data(ttl=1800)
-def fetch_and_build_temp_grid(target_dts):
-    points = []
-    cols, rows = 36, 24 
-    
-    for r in range(rows):
-        lat = 80 - (140 * r / (rows - 1))
-        for c in range(cols):
-            lon = -180 + (360 * c / cols)
-            points.append({"lat": round(lat, 2), "lon": round(lon, 2)})
-            
-    chunk_size = 90
-    all_hourly_data = []
-    
-    for i in range(0, len(points), chunk_size):
-        chunk = points[i:i+chunk_size]
-        lats = ",".join([str(p['lat']) for p in chunk])
-        lons = ",".join([str(p['lon']) for p in chunk])
-        
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}&hourly=temperature_2m&temperature_unit=fahrenheit&past_days=1&forecast_days=2"
-        
-        try:
-            data = requests.get(url, timeout=15).json()
-            if not isinstance(data, list): data = [data]
-            all_hourly_data.extend(data)
-        except Exception as e:
-            print(f"Error fetching Open-Meteo chunk {i}: {e}")
-            all_hourly_data.extend([{} for _ in chunk])
-            
-        # Pacing delay to avoid triggering Open-Meteo API free-tier limits
-        time.sleep(0.25)
-
-    frames_grids = []
-    for target_dt in target_dts:
-        target_ts = target_dt.timestamp()
-        grid = []
-        for i, point in enumerate(points):
-            try:
-                hourly = all_hourly_data[i].get('hourly', None)
-                if not hourly: continue
-                
-                times_ts = [datetime.strptime(t, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc).timestamp() for t in hourly['time']]
-                temps = hourly['temperature_2m']
-                
-                temp_val = None
-                if target_ts <= times_ts[0]: temp_val = temps[0]
-                elif target_ts >= times_ts[-1]: temp_val = temps[-1]
-                else:
-                    for j in range(len(times_ts) - 1):
-                        if times_ts[j] <= target_ts <= times_ts[j+1]:
-                            t0, t1 = times_ts[j], times_ts[j+1]
-                            v0, v1 = temps[j], temps[j+1]
-                            if v0 is not None and v1 is not None:
-                                temp_val = v0 + (v1 - v0) * ((target_ts - t0) / (t1 - t0))
-                            break
-                if temp_val is not None:
-                    grid.append({"lat": point['lat'], "lon": point['lon'], "t": int(round(temp_val))})
-            except Exception:
-                pass
-        frames_grids.append(grid)
-    return frames_grids
-
 with st.spinner("Fetching Satellite & Radar Geometry..."):
     radar_frames = build_flipbook_assets()
-    if radar_frames:
-        target_dts = [f["dt"] for f in radar_frames]
-        temp_grids = fetch_and_build_temp_grid(target_dts)
-        for i, frame in enumerate(radar_frames):
-            frame["grid"] = temp_grids[i] if temp_grids else []
 
 if not radar_frames:
     st.error("Failed to connect to WMS servers after multiple fallbacks. NOAA servers may be down.")
     st.stop()
 
-# Build the JS Array Payload. Notice `f['img']` injects either Base64 or the static URL natively now.
-js_frames_array = ",\n".join([f"{{ ts: {int(f['dt'].timestamp())}, time: '{f['time']}', img: '{f['img']}', grid: {json.dumps(f.get('grid', []))} }}" for f in radar_frames])
+# Build the JS Array Payload (No grid data included)
+js_frames_array = ",\n".join([f"{{ ts: {int(f['dt'].timestamp())}, time: '{f['time']}', img: '{f['img']}' }}" for f in radar_frames])
 
 html_code = f"""
 <!DOCTYPE html>
 <html>
 <head>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <style>
         body {{ margin: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px 0; transition: background 0.3s; }}
         
@@ -225,25 +137,6 @@ html_code = f"""
         
         .radar-blend {{ mix-blend-mode: multiply; }} 
         body.dark-theme .radar-blend {{ mix-blend-mode: screen; }} 
-        
-        /* NEW STYLES: Shaded Colored Circles for Temperatures */
-        .temp-point {{ 
-            width: 24px; 
-            height: 24px; 
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-weight: 700; 
-            font-size: 11px; 
-            letter-spacing: -0.5px;
-            color: #0f172a; 
-            box-shadow: 0 3px 6px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.6); 
-            border: 1px solid rgba(0,0,0,0.15);
-            margin-left: -12px; 
-            margin-top: -12px; 
-        }}
         
         #controls-wrapper {{ background: #ffffff; color: #1e293b; padding: 10px 20px; border-radius: 12px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: row; align-items: center; gap: 15px; border: 1px solid #e2e8f0; transition: all 0.3s; flex-wrap: wrap; justify-content: center;}}
         body.dark-theme #controls-wrapper {{ background: #1e293b; color: #f8fafc; border-color: #334155; }}
@@ -288,23 +181,14 @@ html_code = f"""
             </div>
             
             <div class="toggle-group">
-                <input type="checkbox" id="t-grid-toggle">
-                <label for="t-grid-toggle">🌡️ Temps</label>
-            </div>
-            
-            <div class="toggle-group">
                 <input type="radio" id="f-raw" name="radarFilter" value="none">
                 <label for="f-raw">Raw</label>
-                
                 <input type="radio" id="f-combined" name="radarFilter" value="combined" checked>
                 <label for="f-combined">3-Tier</label>
-                
                 <input type="radio" id="f-cyan" name="radarFilter" value="cyan">
                 <label for="f-cyan">Light</label>
-                
                 <input type="radio" id="f-blue" name="radarFilter" value="blue">
                 <label for="f-blue">Mod</label>
-                
                 <input type="radio" id="f-red" name="radarFilter" value="red">
                 <label for="f-red">Heavy</label>
             </div>
@@ -323,7 +207,6 @@ html_code = f"""
         let rainviewerFrames = [];
         const hrrrBounds = {MAP_BOUNDS};
         
-        // --- Leaflet Initialization ---
         const map = L.map('map', {{
             zoomControl: false,
             minZoom: 3,
@@ -352,17 +235,14 @@ html_code = f"""
         ];
         let hrrrActiveBuffer = 0;
 
-        let tempLayerGroup = L.layerGroup().addTo(map);
         let rainviewerLayers = {{}};
         
         const slider = document.getElementById('slider');
         const timeDisplay = document.getElementById('time-display');
         const playBtn = document.getElementById('playBtn');
-        const tGridToggle = document.getElementById('t-grid-toggle');
         
         let timer = null;
         let isPlaying = false;
-        let showTempGrid = tGridToggle.checked;
         let activeFilter = 'combined';
         let frameCache = {{}};
         let lastDrawnRvIdx = -1;
@@ -532,13 +412,6 @@ html_code = f"""
             lastDrawnRvIdx = targetIdx;
         }}
 
-        function getTempColor(t) {{
-            if (t < 10) return '#c4b5fd'; if (t < 25) return '#93c5fd'; 
-            if (t < 40) return '#67e8f9'; if (t < 55) return '#86efac'; 
-            if (t < 70) return '#fde047'; if (t < 85) return '#fdba74'; 
-            if (t < 95) return '#f87171'; return '#fca5a5'; 
-        }}
-
         function drawFrame(index) {{
             if (!frames[index]) return;
             let targetTs = frames[index].ts;
@@ -571,20 +444,6 @@ html_code = f"""
             }}
 
             timeDisplay.innerText = frames[index].time + globalStatus;
-            
-            tempLayerGroup.clearLayers();
-            if (showTempGrid && frames[index].grid) {{
-                frames[index].grid.forEach(pt => {{
-                    let color = getTempColor(pt.t);
-                    let icon = L.divIcon({{
-                        className: 'custom-temp',
-                        iconSize: null,
-                        /* NEW LOGIC: Dynamic background color with 90% opacity (E6) */
-                        html: `<div class="temp-point" style="background-color: ${{color}}E6;">${{pt.t}}</div>`
-                    }});
-                    L.marker([pt.lat, pt.lon], {{icon: icon, interactive: false}}).addTo(tempLayerGroup);
-                }});
-            }}
         }}
 
         function nextFrame() {{
@@ -603,11 +462,6 @@ html_code = f"""
             if (isPlaying) playBtn.click();
             drawFrame(e.target.value);
         }};
-
-        tGridToggle.addEventListener('change', (e) => {{
-            showTempGrid = e.target.checked;
-            drawFrame(slider.value);
-        }});
 
         document.querySelectorAll('input[name="mapTheme"]').forEach(radio => {{
             radio.addEventListener('change', (e) => {{
@@ -639,4 +493,5 @@ html_code = f"""
 </html>
 """
 
+# Render full width on mobile
 components.html(html_code, height=750)
