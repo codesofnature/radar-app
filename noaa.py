@@ -207,7 +207,7 @@ def generate_temp_overlay(target_dt, om_data):
         edge[:, 1:] |= norm[:, 1:] != norm[:, :-1]
         edge[:, :-1] |= norm[:, 1:] != norm[:, :-1]
         
-        colors[edge] = [0, 0, 0, 130]
+        colors[edge] = [0, 0, 0, 40]
         
         final_img = Image.fromarray(colors, mode="RGBA")
         buf = io.BytesIO()
