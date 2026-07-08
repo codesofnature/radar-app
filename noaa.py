@@ -18,13 +18,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # --- Page Config ---
-st.set_page_config(page_title="Instant Radar", layout="wide", page_icon="⚡")
+# 'wide' layout and collapsed sidebar help maximize screen real estate
+st.set_page_config(page_title="Instant Radar", layout="wide", page_icon="⚡", initial_sidebar_state="collapsed")
+
+# Hide Streamlit's default header/footer for a true fullscreen app feel
+st.markdown("""
+    <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .block-container {padding-top: 0rem; padding-bottom: 0rem;}
+    </style>
+""", unsafe_allow_html=True)
 
 # --- Configuration ---
 LOCAL_TZ = ZoneInfo("America/New_York")
 
-# Reduced resolution factor. 1.5 is plenty sharp for a car display 
-# and drastically reduces download size and memory footprint.
 BBOX = "-14200000,2700000,-7200000,6400000"
 WIDTH = 1200
 HEIGHT = 700
@@ -55,20 +64,16 @@ def process_radar_image(img_bytes):
         r, g, b, a = data[:,:,0], data[:,:,1], data[:,:,2], data[:,:,3]
         out = np.zeros_like(data)
         
-        # Identify pixels with enough opacity
         valid = a >= 100
         
-        # Color tier logic
         is_severe = valid & (r > 200) & (g < 80)
         is_mod = valid & (r > 200) & (g >= 80) & (g < 220) & (b < 100)
         is_light = valid & ~is_severe & ~is_mod
         
-        # Apply strict 3-tier colors
-        out[is_severe, 0], out[is_severe, 1], out[is_severe, 2] = 255, 0, 0       # Red
-        out[is_mod, 0], out[is_mod, 1], out[is_mod, 2] = 0, 0, 255                # Blue
-        out[is_light, 0], out[is_light, 1], out[is_light, 2] = 0, 255, 255        # Cyan
+        out[is_severe, 0], out[is_severe, 1], out[is_severe, 2] = 255, 0, 0       
+        out[is_mod, 0], out[is_mod, 1], out[is_mod, 2] = 0, 0, 255                
+        out[is_light, 0], out[is_light, 1], out[is_light, 2] = 0, 255, 255        
         
-        # Adjust alpha
         new_a = np.where(a < 200, a + 55, 255)
         out[valid, 3] = new_a[valid]
         
@@ -98,7 +103,6 @@ def fetch_single_image(url_info, max_retries=2):
         try:
             resp = requests.get(url, timeout=10)
             if resp.status_code == 200 and "image" in resp.headers.get("Content-Type", ""):
-                # Process the image colors in Python
                 processed_bytes = process_radar_image(resp.content)
                 b64 = base64.b64encode(processed_bytes).decode("utf-8")
                 return f"data:image/png;base64,{b64}"
@@ -129,7 +133,6 @@ def build_hrrr_assets():
                 url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer_name}&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&CRS=EPSG:3857&BBOX={BBOX}"
                 local_time = frame_time.astimezone(LOCAL_TZ)
                 
-                # Simplified date/time string
                 time_str = local_time.strftime("%a, %b %d - %I:%M %p")
                 urls_to_fetch.append((frame_time, time_str, url))
 
@@ -151,14 +154,13 @@ def build_hrrr_assets():
 
 # --- Flipbook Renderer ---
 def render_flipbook():
-    with st.spinner("📡 Processing radar imagery..."):
+    with st.spinner("📡 Processing radar imagery for vehicle display..."):
         radar_frames = build_hrrr_assets()
         
     if not radar_frames:
         st.error("Failed to fetch radar imagery.")
         return
 
-    # Pass the pre-processed base64 images straight to Javascript
     js_frames_array = ",\n".join(
         [f"{{ time: '{f['time']}', img: '{f['img']}' }}" for f in radar_frames]
     )
@@ -170,53 +172,69 @@ def render_flipbook():
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
         <style>
-            body {{ margin: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                   display: flex; flex-direction: column; align-items: center; padding: 2px 0; }}
-            #app-container {{ display: flex; flex-direction: column; gap: 12px; align-items: center; width: 100%; max-width: {WIDTH}px; }}
-            #map-container {{ position: relative; width: 100%; height: {HEIGHT}px; border-radius: 12px;
-                            border: 1px solid #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.1); overflow: hidden; }}
+            body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }}
+            
+            #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }}
             #map {{ width: 100%; height: 100%; background: #cce4f0; }}
             
             .radar-blend {{ mix-blend-mode: multiply; }}
             
-            #controls-wrapper {{ background: #ffffff; color: #1e293b; padding: 12px 24px; border-radius: 12px; width: 100%; box-sizing: border-box;
-                                 box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; flex-direction: row; align-items: center; gap: 20px;
-                                 border: 1px solid #e2e8f0; justify-content: space-between; }}
+            /* Floating controls overlay */
+            #controls-wrapper {{ 
+                position: absolute; 
+                top: 20px; 
+                left: 50%; 
+                transform: translateX(-50%); 
+                z-index: 9999; 
+                background: rgba(255, 255, 255, 0.9); 
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                padding: 10px 20px; 
+                border-radius: 40px; 
+                box-shadow: 0 4px 20px rgba(0,0,0,0.15); 
+                display: flex; 
+                flex-direction: row; 
+                align-items: center; 
+                gap: 15px; 
+                width: 90%; 
+                max-width: 600px; 
+            }}
             
-            #playBtn {{ background: #2563eb; border: none; color: white; width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
-                       font-size: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
+            #playBtn {{ background: #2563eb; border: none; color: white; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
+                       font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
             #playBtn:hover {{ background: #1d4ed8; }}
             
-            .slider-container {{ flex-grow: 1; display: flex; align-items: center; padding: 0 10px; }}
+            .slider-container {{ flex-grow: 1; display: flex; align-items: center; }}
             
-            /* Enhanced Slider Styling */
             input[type="range"] {{ -webkit-appearance: none; width: 100%; background: transparent; cursor: pointer; margin: 0; height: 24px; }}
             input[type="range"]:focus {{ outline: none; }}
-            input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 22px; width: 22px; border-radius: 50%; background: #2563eb; 
-                                                         margin-top: -8px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); border: 2px solid #fff; }}
+            input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #2563eb; 
+                                                         margin-top: -7px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); border: 2px solid #fff; }}
             input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 6px; background: #cbd5e1; border-radius: 3px; }}
             
-            #time-display {{ font-size: 18px; font-weight: 700; color: #0f172a; min-width: 280px; text-align: right; white-space: nowrap; letter-spacing: -0.5px; }}
+            #time-display {{ font-size: 16px; font-weight: 700; color: #0f172a; min-width: 220px; text-align: right; white-space: nowrap; letter-spacing: -0.3px; }}
             
-            #loading-overlay {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); 
-                                display: flex; align-items: center; justify-content: center; z-index: 9999; font-size: 16px; 
-                                color: #64748b; border-radius: 12px; transition: opacity 0.3s; }}
+            #loading-overlay {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.9); 
+                                display: flex; align-items: center; justify-content: center; z-index: 10000; font-size: 18px; font-weight: bold;
+                                color: #334155; transition: opacity 0.4s ease-out; }}
             #loading-overlay.hidden {{ opacity: 0; pointer-events: none; }}
+            
+            /* Move Leaflet zoom controls down so they don't hit our floating pill */
+            .leaflet-top.leaflet-right {{ top: 80px; right: 10px; }}
         </style>
     </head>
     <body>
-        <div id="app-container">
+        <div id="loading-overlay">Initializing Map…</div>
+        
+        <div id="map-container">
+            <div id="map"></div>
+            
             <div id="controls-wrapper">
                 <button id="playBtn">&#9654;</button>
                 <div class="slider-container">
                     <input type="range" id="slider" min="0" max="{len(radar_frames) - 1}" value="0">
                 </div>
                 <div id="time-display">Loading...</div>
-            </div>
-    
-            <div id="map-container">
-                <div id="map"></div>
-                <div id="loading-overlay">Initializing Map…</div>
             </div>
         </div>
     
@@ -255,7 +273,6 @@ def render_flipbook():
             function drawFrame(index) {{
                 if (!frames[index]) return;
                 
-                // No canvas processing needed, just set the pre-processed URL directly
                 let targetFrame = frames[index];
                 primaryLayer.setUrl(targetFrame.img);
                 timeDisplay.innerText = targetFrame.time;
@@ -281,14 +298,14 @@ def render_flipbook():
                     playBtn.innerHTML = "&#9654;"; // Play icon
                     isPlaying = false; 
                 }} else {{ 
-                    timer = setInterval(nextFrame, 450); // Smoother playback interval
+                    timer = setInterval(nextFrame, 450); 
                     playBtn.innerHTML = "&#10074;&#10074;"; // Pause icon
                     isPlaying = true; 
                 }}
             }};
             
             slider.oninput = (e) => {{ 
-                if (isPlaying) playBtn.click(); // Auto-pause if user grabs slider
+                if (isPlaying) playBtn.click(); 
                 drawFrame(e.target.value); 
             }};
     
@@ -299,20 +316,24 @@ def render_flipbook():
                 else if (e.code === 'ArrowRight') {{ e.preventDefault(); if (isPlaying) playBtn.click(); nextFrame(); }}
             }});
     
-            // Initialize first frame
+            // Initialize
             drawFrame(0);
-            loadingOverlay.classList.add('hidden');
             
-            // Auto-play on load
-            if (totalFrames > 1) {{
-                setTimeout(() => playBtn.click(), 500);
-            }}
+            // Wait for map to settle before hiding overlay
+            map.whenReady(() => {{
+                setTimeout(() => {{
+                    loadingOverlay.classList.add('hidden');
+                    if (totalFrames > 1) playBtn.click();
+                }}, 600);
+            }});
             
         </script>
     </body>
     </html>
     """
-    components.html(html_code, height=760)
+    
+    # Render at a large height to trigger fullscreen behavior on the device
+    components.html(html_code, height=850)
 
 # --- App Render ---
 render_flipbook()
