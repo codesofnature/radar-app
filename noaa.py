@@ -5,13 +5,14 @@ import base64
 import concurrent.futures
 import math
 import io
-import os
 import time
 import logging
+import json
 import numpy as np
 from PIL import Image
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from functools import lru_cache
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -20,28 +21,63 @@ logger = logging.getLogger(__name__)
 # --- Page Config ---
 st.set_page_config(page_title="Instant Radar", layout="wide", page_icon="⚡", initial_sidebar_state="collapsed")
 
+# --- Streamlit UI Tweaks ---
 st.markdown("""
-    <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-        .block-container {padding-top: 0rem; padding-bottom: 0rem;}
-    </style>
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+.block-container {
+    padding: 0rem !important;
+    max-width: 100% !important;
+}
+.stApp {
+    background-color: #cce4f0 !important;
+}
+iframe {
+    border: none;
+}
+</style>
 """, unsafe_allow_html=True)
 
 # --- Configuration ---
 LOCAL_TZ = ZoneInfo("America/New_York")
-
-# Updated BBOX to match the 1200x700 aspect ratio perfectly.
-# Top edge is set to ~50.05°N (Winnipeg), removing the wasted Canada space.
 BBOX = "-14000000,2630000,-7400000,6480000"
 WIDTH = 1200
 HEIGHT = 700
 RADAR_RES_FACTOR = 1.5
 RADAR_W = int(WIDTH * RADAR_RES_FACTOR)
 RADAR_H = int(HEIGHT * RADAR_RES_FACTOR)
-
 MINUTES_OFFSETS = list(range(0, 18 * 60, 15)) + list(range(18 * 60, 49 * 60, 60))
+
+# --- Embedded Image Helpers ---
+@lru_cache(maxsize=None)
+def get_embedded_sun_image():
+    """Returns base64-encoded ultra-realistic sun image as data URI"""
+    try:
+        # High-quality sun image from Unsplash
+        sun_url = "https://images.unsplash.com/photo-1614730341194-75c607400070?w=400&h=400&fit=crop"
+        response = requests.get(sun_url, timeout=10)
+        if response.status_code == 200:
+            b64 = base64.b64encode(response.content).decode('utf-8')
+            return f"data:image/jpeg;base64,{b64}"
+    except Exception as e:
+        logger.warning(f"Failed to fetch sun image: {e}")
+    return ""
+
+@lru_cache(maxsize=None)
+def get_embedded_moon_image():
+    """Returns base64-encoded ultra-realistic moon image as data URI"""
+    try:
+        # High-quality moon image from Unsplash
+        moon_url = "https://images.unsplash.com/photo-1532978379173-523502d2fe77?w=400&h=400&fit=crop"
+        response = requests.get(moon_url, timeout=10)
+        if response.status_code == 200:
+            b64 = base64.b64encode(response.content).decode('utf-8')
+            return f"data:image/jpeg;base64,{b64}"
+    except Exception as e:
+        logger.warning(f"Failed to fetch moon image: {e}")
+    return ""
 
 # --- Helpers ---
 def mercator_to_latlon(x, y):
@@ -55,23 +91,138 @@ lat_min, lon_min = mercator_to_latlon(xmin, ymin)
 lat_max, lon_max = mercator_to_latlon(xmax, ymax)
 MAP_BOUNDS = f"[[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]]"
 
+# --- Backend: Custom Open-Meteo Contour Generator ---
+# Increased density for better contour accuracy
+ROWS, COLS = 14, 20
+lats = np.linspace(lat_max, lat_min, ROWS)
+lons = np.linspace(lon_min, lon_max, COLS)
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_openmeteo_data():
+    try:
+        lat_list = []
+        lon_list = []
+        for lat in lats:
+            for lon in lons:
+                lat_list.append(f"{lat:.2f}")
+                lon_list.append(f"{lon:.2f}")
+        
+        # Fetch hourly data spanning past and future to cover all HRRR offsets
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={','.join(lat_list)}&longitude={','.join(lon_list)}&hourly=temperature_2m&temperature_unit=fahrenheit&past_days=1&forecast_days=3"
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.error(f"Open-Meteo error: {resp.text}")
+        return []
+    except Exception as e:
+        logger.error(f"Open-Meteo request failed: {e}")
+        return []
+
+def generate_temp_overlay(target_dt, om_data):
+    if not om_data:
+        return "", []
+    try:
+        # Align frame time to closest hour
+        target_hour = target_dt.replace(minute=0, second=0, microsecond=0)
+        if target_dt.minute >= 30:
+            target_hour += timedelta(hours=1)
+        target_time_str = target_hour.strftime("%Y-%m-%dT%H:00")
+        
+        time_arr = om_data[0].get("hourly", {}).get("time", [])
+        
+        # Find the time index - if exact match not found, find nearest
+        try:
+            t_idx = time_arr.index(target_time_str)
+        except ValueError:
+            # Find nearest available hour instead of defaulting to 50
+            if time_arr:
+                target_ts = target_hour.timestamp()
+                best_idx = 0
+                min_diff = float('inf')
+                for i, t in enumerate(time_arr):
+                    try:
+                        dt = datetime.strptime(t, "%Y-%m-%dT%H:%M")
+                        diff = abs(dt.timestamp() - target_ts)
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_idx = i
+                    except:
+                        pass
+                t_idx = best_idx
+            else:
+                t_idx = -1
+        
+        temps = []
+        grid_data = []
+        idx = 0
+        for r, lat in enumerate(lats):
+            for c, lon in enumerate(lons):
+                val = 50.0
+                if t_idx != -1 and idx < len(om_data):
+                    loc_temps = om_data[idx].get("hourly", {}).get("temperature_2m", [])
+                    if t_idx < len(loc_temps) and loc_temps[t_idx] is not None:
+                        val = loc_temps[t_idx]
+                temps.append(val)
+                grid_data.append({"lat": lat, "lon": lon, "val": round(val)})
+                idx += 1
+        
+        # Generate Contour Image
+        temp_grid = np.array(temps, dtype=np.float32).reshape((ROWS, COLS))
+        grid_img = Image.fromarray(temp_grid, mode="F")
+        large_grid_img = grid_img.resize((RADAR_W, RADAR_H), Image.BICUBIC)
+        smooth_temps = np.array(large_grid_img)
+        
+        norm = np.clip((smooth_temps - 20) / 100.0, 0, 1)
+        norm = np.floor(norm * 10) / 10.0
+        
+        colors = np.zeros((RADAR_H, RADAR_W, 4), dtype=np.uint8)
+        m1 = norm < 0.25
+        m2 = (norm >= 0.25) & (norm < 0.50)
+        m3 = (norm >= 0.50) & (norm < 0.75)
+        m4 = norm >= 0.75
+        
+        f1 = norm / 0.25
+        f2 = (norm - 0.25) / 0.25
+        f3 = (norm - 0.50) / 0.25
+        f4 = (norm - 0.75) / 0.25
+        
+        colors[m1, 2] = 139 + 116 * f1[m1]
+        colors[m2, 1] = 255 * f2[m2]
+        colors[m2, 2] = 255 - 255 * f2[m2]
+        colors[m3, 0] = 255 * f3[m3]
+        colors[m3, 1] = 255 - 115 * f3[m3]
+        colors[m4, 0] = 255 - 116 * f4[m4]
+        colors[m4, 1] = 140 - 140 * f4[m4]
+        
+        # Highly transparent overlay (approx 18% opacity)
+        colors[:, :, 3] = 45
+        
+        final_img = Image.fromarray(colors, mode="RGBA")
+        buf = io.BytesIO()
+        final_img.save(buf, format="PNG", optimize=True)
+        b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{b64}", grid_data
+    except Exception as e:
+        logger.error(f"Open-Meteo rendering error: {e}")
+        return "", []
+
+# --- Image Processing ---
 def process_radar_image(img_bytes):
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
         data = np.array(img)
         
         r, g, b, a = data[:,:,0], data[:,:,1], data[:,:,2], data[:,:,3]
+        
         out = np.zeros_like(data)
-        
         valid = a >= 100
-        
         is_severe = valid & (r > 200) & (g < 80)
         is_mod = valid & (r > 200) & (g >= 80) & (g < 220) & (b < 100)
         is_light = valid & ~is_severe & ~is_mod
         
-        out[is_severe, 0], out[is_severe, 1], out[is_severe, 2] = 255, 0, 0       
-        out[is_mod, 0], out[is_mod, 1], out[is_mod, 2] = 0, 0, 255                
-        out[is_light, 0], out[is_light, 1], out[is_light, 2] = 0, 255, 255        
+        out[is_severe, 0], out[is_severe, 1], out[is_severe, 2] = 255, 0, 0
+        out[is_mod, 0], out[is_mod, 1], out[is_mod, 2] = 0, 0, 255
+        out[is_light, 0], out[is_light, 1], out[is_light, 2] = 0, 255, 0
         
         new_a = np.where(a < 200, a + 55, 255)
         out[valid, 3] = new_a[valid]
@@ -80,7 +231,6 @@ def process_radar_image(img_bytes):
         buf = io.BytesIO()
         final_img.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
-        
     except Exception as e:
         logger.error(f"Image processing error: {e}")
         return img_bytes
@@ -90,262 +240,710 @@ def get_model_init_time():
     try:
         res = requests.get("https://mesonet.agron.iastate.edu/data/gis/images/4326/hrrr/refd_1080.json", timeout=5)
         dt_str = res.json()["model_init_utc"]
-        if not dt_str.endswith("Z"): dt_str += "Z"
+        if not dt_str.endswith("Z"):
+            dt_str += "Z"
         return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except Exception as e:
         now = datetime.now(timezone.utc)
         return now.replace(minute=0, second=0, microsecond=0)
 
-def fetch_single_image(url_info, max_retries=2):
+def fetch_frame_data(url_info, om_data, max_retries=2):
     frame_time, time_str, url = url_info
+    radar_src = None
+    
+    # Radar Fetch
     for attempt in range(max_retries + 1):
         try:
             resp = requests.get(url, timeout=10)
             if resp.status_code == 200 and "image" in resp.headers.get("Content-Type", ""):
                 processed_bytes = process_radar_image(resp.content)
-                b64 = base64.b64encode(processed_bytes).decode("utf-8")
-                return f"data:image/png;base64,{b64}"
+                b64 = base64.b64encode(processed_bytes).decode('utf-8')
+                radar_src = f"data:image/png;base64,{b64}"
+                break
             elif resp.status_code == 404:
                 return None
         except Exception:
-            if attempt < max_retries: time.sleep(0.5 * (attempt + 1))
+            if attempt < max_retries:
+                time.sleep(0.5 * (attempt + 1))
+    
+    if radar_src:
+        temp_img, temp_grid = generate_temp_overlay(frame_time, om_data)
+        return {
+            "dt": frame_time,
+            "time": time_str,
+            "radarImg": radar_src,
+            "tempImg": temp_img,
+            "tempGrid": temp_grid
+        }
     return None
 
 @st.cache_data(ttl=300, show_spinner=False)
-def build_hrrr_assets():
-    init_time = get_model_init_time()
+def fetch_live_frame():
     now = datetime.now(timezone.utc)
-    frames_data = []
+    om_data = fetch_openmeteo_data()
     
     live_wms_url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0q-900913&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&SRS=EPSG:3857&BBOX={BBOX}"
     live_label = now.astimezone(LOCAL_TZ).strftime("%a, %b %d - %I:%M %p (Live)")
-    live_img = fetch_single_image((now, live_label, live_wms_url))
-    if live_img: frames_data.append({"dt": now, "time": live_label, "img": live_img})
+    
+    frame = fetch_frame_data((now, live_label, live_wms_url), om_data)
+    if frame:
+        return [frame]
+    return []
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_forecast_frames():
+    init_time = get_model_init_time()
+    now = datetime.now(timezone.utc)
+    om_data = fetch_openmeteo_data()
+    frames_data = []
+    
     for attempt in range(3):
         hrrr_frames = []
         urls_to_fetch = []
+        
         for mins_offset in MINUTES_OFFSETS:
             frame_time = init_time + timedelta(minutes=mins_offset)
             if frame_time > now:
                 layer_name = f"refd_{str(mins_offset).zfill(4)}"
                 url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer_name}&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&CRS=EPSG:3857&BBOX={BBOX}"
                 local_time = frame_time.astimezone(LOCAL_TZ)
-                
                 time_str = local_time.strftime("%a, %b %d - %I:%M %p")
                 urls_to_fetch.append((frame_time, time_str, url))
-
+        
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-            futures = {executor.submit(fetch_single_image, u): u for u in urls_to_fetch}
+            futures = {executor.submit(fetch_frame_data, u, om_data): u for u in urls_to_fetch}
             for future in concurrent.futures.as_completed(futures):
-                u_info = futures[future]
-                img_src = future.result()
-                if img_src: hrrr_frames.append({"dt": u_info[0], "time": u_info[1], "img": img_src})
-
+                result = future.result()
+                if result:
+                    hrrr_frames.append(result)
+        
         if len(hrrr_frames) > 5:
             hrrr_frames.sort(key=lambda x: x["dt"])
             frames_data.extend(hrrr_frames)
             return frames_data
         
         init_time = init_time - timedelta(hours=1)
-
+    
     return frames_data
+
+# --- HTML Generator ---
+def generate_map_html(radar_frames, mode="live"):
+    is_forecast = (mode == "forecast")
+    
+    # Get embedded images
+    sun_img_data = get_embedded_sun_image()
+    moon_img_data = get_embedded_moon_image()
+    
+    frames_js_list = []
+    for f in radar_frames:
+        grid_json = json.dumps(f['tempGrid'])
+        ts_val = int(f["dt"].timestamp() * 1000)
+        frames_js_list.append(f"""{{ ts: {ts_val}, time: '{f["time"]}', radarImg: '{f["radarImg"]}', tempImg: '{f["tempImg"]}', tempGrid: {grid_json} }}""")
+    
+    js_frames_array = ",\n".join(frames_js_list)
+    
+    # Sun HTML - use image if available, fallback to CSS
+    if sun_img_data:
+        sun_html = f"""
+        <div id="sun-indicator">
+            <div class="sun-glow"></div>
+            <div class="sun-image-container">
+                <img class="sun-image" src="{sun_img_data}" alt="Sun">
+            </div>
+        </div>
+        """
+    else:
+        sun_html = """
+        <div id="sun-indicator">
+            <div class="sun-corona"></div>
+            <div class="sun-core"></div>
+            <div class="sun-flare" style="top: 10%; left: 20%;"></div>
+            <div class="sun-flare" style="top: 70%; right: 15%; animation-delay: 0.7s;"></div>
+            <div class="sun-flare" style="bottom: 20%; left: 30%; animation-delay: 1.4s;"></div>
+        </div>
+        """
+    
+    # Moon HTML - use image if available, fallback to CSS
+    if moon_img_data:
+        moon_html = f"""
+        <div id="moon-indicator">
+            <div class="moon-glow"></div>
+            <div class="moon-image-container">
+                <img class="moon-image" src="{moon_img_data}" alt="Moon">
+                <div class="moon-phase-shadow" id="moonShadow"></div>
+            </div>
+        </div>
+        """
+    else:
+        moon_html = """
+        <div id="moon-indicator">
+            <div class="moon-glow"></div>
+            <div class="moon-container">
+                <div class="moon-surface">
+                    <div class="moon-crater" style="width: 15px; height: 15px; top: 20%; left: 25%;"></div>
+                    <div class="moon-crater" style="width: 10px; height: 10px; top: 50%; left: 60%;"></div>
+                    <div class="moon-crater" style="width: 12px; height: 12px; top: 65%; left: 35%;"></div>
+                    <div class="moon-crater" style="width: 8px; height: 8px; top: 30%; left: 70%;"></div>
+                </div>
+                <div class="moon-shadow" id="moonShadow"></div>
+            </div>
+        </div>
+        """
+    
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.8.0/suncalc.min.js"></script>
+    <style>
+        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }}
+        #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }}
+        #map {{ width: 100%; height: 100%; background: transparent; }}
+        .radar-blend {{ mix-blend-mode: multiply; }}
+        .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
+        
+        /* --- Coordinate Text Markers --- */
+        .temp-label {{
+            font-size: 15px;
+            font-weight: 900;
+            color: #ffffff;
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            text-align: center;
+            pointer-events: none;
+            margin-top: -8px;
+        }}
+        
+        /* --- Top Left Layer Selector --- */
+        #layer-selector {{
+            position: absolute;
+            left: 15px;
+            top: 15px;
+            z-index: 9999;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 12px 18px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #0f172a;
+        }}
+        .radio-label {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }}
+        .radio-label input[type="radio"] {{
+            accent-color: #4f46e5;
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+        }}
+        
+        /* --- Top Middle Time Display --- */
+        #time-display {{ 
+            position: absolute; 
+            top: 15px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 9999; 
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 10px 24px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
+            font-size: 22px; 
+            font-weight: 800; 
+            color: #0f172a; 
+            white-space: nowrap; 
+            letter-spacing: -0.5px;
+        }}
+        
+        /* --- Left Vertical Controls --- */
+        #left-controls {{
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 9999;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 15px 12px;
+            border-radius: 16px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 25px;
+        }}
+        #playBtn {{ 
+            background: #4f46e5; border: none; color: white; width: 34px; height: 34px; 
+            border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; 
+            align-items: center; justify-content: center; flex-shrink: 0; 
+            transition: background 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); 
+        }}
+        #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
+        #playBtn:disabled {{ background: #94a3b8; cursor: wait; }}
+        .slider-container {{ position: relative; width: 20px; height: 250px; }}
+        input[type="range"] {{ 
+            -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; 
+            position: absolute; width: 250px; height: 20px; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(-90deg);
+        }}
+        input[type="range"]:focus {{ outline: none; }}
+        input[type="range"]::-webkit-slider-thumb {{ 
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; 
+            background: #4f46e5; margin-top: -6px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); border: 2px solid #fff; cursor: grab;
+        }}
+        input[type="range"]:disabled::-webkit-slider-thumb {{ background: #94a3b8; cursor: wait; }}
+        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: #cbd5e1; border-radius: 2px; }}
+        
+        #loading-overlay {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.9); 
+                            display: flex; align-items: center; justify-content: center; z-index: 10000; font-size: 18px; font-weight: bold;
+                            color: #334155; transition: opacity 0.4s ease-out; }}
+        #loading-overlay.hidden {{ opacity: 0; pointer-events: none; }}
+        
+        .leaflet-top.leaflet-right {{ top: 15px; right: 15px; }}
+        
+        body.forecast-mode {{ opacity: 0; transition: opacity 0.7s ease-in-out; }}
+        body.forecast-mode.loaded {{ opacity: 1; }}
+        body.forecast-mode #loading-overlay {{ display: none !important; }}
+        
+        /* --- Ultra-Realistic Sun Indicator (Image-Based) --- */
+        #sun-indicator {{
+            position: absolute;
+            bottom: 25px;
+            left: 25px;
+            z-index: 9999;
+            width: 120px;
+            height: 120px;
+            transition: opacity 0.5s ease, transform 0.5s ease;
+            pointer-events: none;
+            opacity: 0;
+        }}
+        .sun-image-container {{
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            overflow: visible;
+            animation: sunPulse 4s ease-in-out infinite;
+        }}
+        .sun-image {{
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            filter: drop-shadow(0 0 30px rgba(255, 200, 0, 0.8))
+                    drop-shadow(0 0 60px rgba(255, 140, 0, 0.5))
+                    drop-shadow(0 0 90px rgba(255, 69, 0, 0.3));
+        }}
+        .sun-glow {{
+            position: absolute;
+            top: -30%;
+            left: -30%;
+            width: 160%;
+            height: 160%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 200, 0, 0.4) 0%, rgba(255, 140, 0, 0.2) 40%, transparent 70%);
+            animation: glowPulse 3s ease-in-out infinite;
+            pointer-events: none;
+        }}
+        @keyframes sunPulse {{
+            0%, 100% {{ transform: scale(1) rotate(0deg); }}
+            50% {{ transform: scale(1.08) rotate(2deg); }}
+        }}
+        @keyframes glowPulse {{
+            0%, 100% {{ opacity: 0.6; transform: scale(1); }}
+            50% {{ opacity: 1; transform: scale(1.1); }}
+        }}
+        
+        /* Fallback CSS Sun (if image fails) */
+        .sun-core {{
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #fff5e0 0%, #ffd700 20%, #ff8c00 50%, #ff4500 80%, #8b0000 100%);
+            box-shadow: 
+                0 0 60px 30px rgba(255, 200, 0, 0.6),
+                0 0 100px 50px rgba(255, 140, 0, 0.4),
+                0 0 140px 70px rgba(255, 69, 0, 0.2),
+                inset -10px -10px 30px rgba(139, 0, 0, 0.5);
+            animation: sunPulse 3s ease-in-out infinite;
+        }}
+        .sun-corona {{
+            position: absolute;
+            width: 140%;
+            height: 140%;
+            top: -20%;
+            left: -20%;
+            border-radius: 50%;
+            background: radial-gradient(circle, transparent 40%, rgba(255, 200, 0, 0.3) 60%, rgba(255, 140, 0, 0.1) 80%, transparent 100%);
+            animation: coronaRotate 20s linear infinite;
+        }}
+        .sun-flare {{
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: radial-gradient(circle, #fff 0%, #ffd700 50%, transparent 100%);
+            border-radius: 50%;
+            animation: flarePulse 2s ease-in-out infinite;
+        }}
+        @keyframes coronaRotate {{
+            from {{ transform: rotate(0deg); }}
+            to {{ transform: rotate(360deg); }}
+        }}
+        @keyframes flarePulse {{
+            0%, 100% {{ opacity: 0.8; transform: scale(1); }}
+            50% {{ opacity: 1; transform: scale(1.3); }}
+        }}
+        
+        /* --- Ultra-Realistic Moon Indicator (Image-Based) --- */
+        #moon-indicator {{
+            position: absolute;
+            bottom: 25px;
+            right: 25px;
+            z-index: 9999;
+            width: 100px;
+            height: 100px;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }}
+        .moon-image-container {{
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 0 25px 8px rgba(200, 200, 255, 0.4),
+                        0 0 50px 15px rgba(150, 150, 200, 0.2);
+        }}
+        .moon-image {{
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+        }}
+        .moon-phase-shadow {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a1a;
+            border-radius: 50%;
+            transition: clip-path 0.5s ease;
+        }}
+        .moon-glow {{
+            position: absolute;
+            top: -20%;
+            left: -20%;
+            width: 140%;
+            height: 140%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(200, 200, 255, 0.3) 0%, transparent 60%);
+            pointer-events: none;
+            animation: moonGlow 5s ease-in-out infinite;
+        }}
+        @keyframes moonGlow {{
+            0%, 100% {{ opacity: 0.7; }}
+            50% {{ opacity: 1; }}
+        }}
+        
+        /* Fallback CSS Moon (if image fails) */
+        .moon-container {{
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 
+                0 0 20px 5px rgba(200, 200, 255, 0.3),
+                0 0 40px 10px rgba(150, 150, 200, 0.2);
+        }}
+        .moon-surface {{
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: 
+                radial-gradient(circle at 25% 25%, rgba(255,255,255,0.1) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(0,0,0,0.2) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, #e8e8e8 0%, #c0c0c0 30%, #a0a0a0 60%, #808080 100%);
+            background-size: 100% 100%, 100% 100%, 100% 100%;
+        }}
+        .moon-crater {{
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.1) 50%, transparent 70%);
+            box-shadow: inset 2px 2px 4px rgba(0,0,0,0.4);
+        }}
+        .moon-shadow {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1a1a2e;
+            border-radius: 50%;
+            transition: transform 0.5s ease;
+        }}
+    </style>
+</head>
+<body class="{'forecast-mode' if is_forecast else 'live-mode'}">
+    <div id="loading-overlay">Initializing Map…</div>
+    <div id="map-container">
+        <div id="map"></div>
+        <div id="layer-selector">
+            <label class="radio-label">
+                <input type="radio" name="layerMode" value="radar" onchange="toggleTemp(false)"> ⚡ Radar
+            </label>
+            <label class="radio-label">
+                <input type="radio" name="layerMode" value="temp" checked onchange="toggleTemp(true)"> 🌡️ Radar + Temps
+            </label>
+        </div>
+        <div id="time-display">Loading...</div>
+        <div id="left-controls">
+            <button id="playBtn">▶</button>
+            <div class="slider-container">
+                <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
+            </div>
+        </div>
+        {sun_html}
+        {moon_html}
+    </div>
+    <script>
+        const frames = [{js_frames_array}];
+        const totalFrames = frames.length;
+        const isLiveMode = {str(not is_forecast).lower()};
+        let showTemps = true;
+        const activeBounds = {MAP_BOUNDS}; 
+        const viewBounds = [[24.0, -125.0], [50.0, -66.0]];
+        
+        // Erie, PA coordinates
+        const erieLat = 42.1292;
+        const erieLon = -80.0851;
+        
+        const map = L.map('map', {{ 
+            zoomControl: false, 
+            minZoom: 4, 
+            maxZoom: 10, 
+            zoomSnap: 0,
+            maxBounds: activeBounds,
+            maxBoundsViscosity: 0.8 
+        }});
+        map.fitBounds(viewBounds);
+        L.control.zoom({{ position: 'topright' }}).addTo(map);
+        
+        // Base Layers Setup
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '&copy; CARTO' }}).addTo(map);
+        
+        map.createPane('primaryPane');
+        map.getPane('primaryPane').style.zIndex = 410;
+        map.getPane('primaryPane').classList.add('radar-blend');
+        let primaryLayer = L.imageOverlay('', activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
+        
+        map.createPane('tempPane');
+        map.getPane('tempPane').style.zIndex = 420; 
+        map.getPane('tempPane').style.pointerEvents = 'none';
+        let tempOverlayLayer = L.imageOverlay('', activeBounds, {{pane: 'tempPane', opacity: 1.0, interactive: false}});
+        
+        // Labels setup
+        const tempLabelsGroup = L.layerGroup();
+        let labelMarkers = [];
+        if (showTemps) {{
+            tempOverlayLayer.addTo(map);
+            tempLabelsGroup.addTo(map);
+        }}
+        
+        const slider = document.getElementById('slider');
+        const timeDisplay = document.getElementById('time-display');
+        const playBtn = document.getElementById('playBtn');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const sunIndicator = document.getElementById('sun-indicator');
+        const moonIndicator = document.getElementById('moon-indicator');
+        const moonShadow = document.getElementById('moonShadow');
+        
+        let timer = null;
+        let isPlaying = false;
+        
+        function updateLabels(gridData) {{
+            if (labelMarkers.length === 0) {{
+                gridData.forEach(pt => {{
+                    let icon = L.divIcon({{
+                        className: 'temp-label',
+                        html: pt.val + '&deg;',
+                        iconSize: [40, 20],
+                        iconAnchor: [20, 10]
+                    }});
+                    let marker = L.marker([pt.lat, pt.lon], {{icon: icon, interactive: false}});
+                    labelMarkers.push(marker);
+                    tempLabelsGroup.addLayer(marker);
+                }});
+            }} else {{
+                gridData.forEach((pt, i) => {{
+                    if (labelMarkers[i]) {{
+                        labelMarkers[i].getElement().innerHTML = pt.val + '&deg;';
+                    }}
+                }});
+            }}
+        }}
+        
+        function updateAstronomy(date) {{
+            // Sun Math
+            const sunPos = SunCalc.getPosition(date, erieLat, erieLon);
+            const sunAltDegrees = sunPos.altitude * (180 / Math.PI);
+            if (sunAltDegrees > -5) {{
+                sunIndicator.style.opacity = Math.min(1, (sunAltDegrees + 5) / 15);
+                const yOffset = Math.max(0, 30 - sunAltDegrees);
+                sunIndicator.style.transform = `translateY(${{yOffset}}px)`;
+            }} else {{
+                sunIndicator.style.opacity = 0;
+            }}
+            
+            // Moon Math - Realistic Phase Rendering with Image
+            const moonPhaseInfo = SunCalc.getMoonIllumination(date);
+            const phase = moonPhaseInfo.phase; // 0 to 1
+            const fraction = moonPhaseInfo.fraction; // 0 to 1 (illuminated portion)
+            
+            // Create clip-path for moon phase shadow
+            let clipPath = '';
+            if (fraction >= 0.99) {{
+                // Full moon - no shadow
+                clipPath = 'circle(0% at 50% 50%)';
+            }} else if (fraction <= 0.01) {{
+                // New moon - fully shadowed
+                clipPath = 'circle(100% at 50% 50%)';
+            }} else {{
+                // Calculate the ellipse parameters for the terminator
+                const shadowWidth = (1 - fraction) * 100;
+                const curveAmount = Math.sin(phase * Math.PI) * 50;
+                
+                if (phase <= 0.5) {{
+                    // Waxing: shadow on left side
+                    clipPath = `ellipse(${{shadowWidth}}% 100% at 0% 50%)`;
+                }} else {{
+                    // Waning: shadow on right side
+                    clipPath = `ellipse(${{shadowWidth}}% 100% at 100% 50%)`;
+                }}
+            }}
+            
+            moonShadow.style.clipPath = clipPath;
+            moonShadow.style.webkitClipPath = clipPath;
+        }}
+        
+        function drawFrame(index) {{
+            if (!frames[index]) return;
+            primaryLayer.setUrl(frames[index].radarImg);
+            if (showTemps && frames[index].tempImg.length > 50) {{
+                tempOverlayLayer.setUrl(frames[index].tempImg);
+                updateLabels(frames[index].tempGrid);
+            }}
+            timeDisplay.innerText = `ॐ ${{frames[index].time}} ॐ`;
+            const frameDate = new Date(frames[index].ts);
+            updateAstronomy(frameDate);
+        }}
+        
+        function toggleTemp(show) {{
+            showTemps = show;
+            if (show) {{
+                map.addLayer(tempOverlayLayer);
+                map.addLayer(tempLabelsGroup);
+            }} else {{
+                map.removeLayer(tempOverlayLayer);
+                map.removeLayer(tempLabelsGroup);
+            }}
+            drawFrame(slider.value); 
+        }}
+        
+        function nextFrame() {{ 
+            let n = parseInt(slider.value) + 1; 
+            if (n > totalFrames - 1) n = 0; 
+            slider.value = n; 
+            drawFrame(n); 
+        }}
+        
+        function prevFrame() {{ 
+            let n = parseInt(slider.value) - 1; 
+            if (n < 0) n = totalFrames - 1; 
+            slider.value = n; 
+            drawFrame(n); 
+        }}
+        
+        playBtn.onclick = () => {{
+            if (isLiveMode) return; 
+            if (isPlaying) {{ 
+                clearInterval(timer); 
+                playBtn.innerHTML = "&#9654;"; 
+                isPlaying = false; 
+            }} else {{ 
+                timer = setInterval(nextFrame, 450); 
+                playBtn.innerHTML = "&#10074;&#10074;"; 
+                isPlaying = true; 
+            }}
+        }};
+        
+        slider.oninput = (e) => {{ 
+            if (isLiveMode) return; 
+            if (isPlaying) playBtn.click(); 
+            drawFrame(e.target.value); 
+        }};
+        
+        if (isLiveMode) {{
+            playBtn.innerHTML = "&#8987;"; 
+            playBtn.disabled = true;
+            slider.disabled = true;
+        }}
+        
+        drawFrame(0);
+        
+        map.whenReady(() => {{
+            if (isLiveMode) {{
+                setTimeout(() => {{ loadingOverlay.classList.add('hidden'); }}, 600);
+            }} else {{
+                setTimeout(() => {{
+                    document.body.classList.add('loaded');
+                    if (totalFrames > 1) playBtn.click();
+                }}, 450); 
+            }}
+        }});
+    </script>
+</body>
+</html>
+"""
 
 # --- Flipbook Renderer ---
 def render_flipbook():
-    with st.spinner("📡 Processing radar imagery for vehicle display..."):
-        radar_frames = build_hrrr_assets()
-        
-    if not radar_frames:
-        st.error("Failed to fetch radar imagery.")
-        return
-
-    js_frames_array = ",\n".join(
-        [f"{{ time: '{f['time']}', img: '{f['img']}' }}" for f in radar_frames]
-    )
-
-    html_code = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-        <style>
-            body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }}
-            
-            #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }}
-            #map {{ width: 100%; height: 100%; background: #cce4f0; }}
-            
-            .radar-blend {{ mix-blend-mode: multiply; }}
-            
-            /* Ultra-thin controls anchored precisely to the top edge */
-            #controls-wrapper {{ 
-                position: absolute; 
-                top: 6px; 
-                left: 50%; 
-                transform: translateX(-50%); 
-                z-index: 9999; 
-                background: rgba(255, 255, 255, 0.95); 
-                backdrop-filter: blur(8px);
-                -webkit-backdrop-filter: blur(8px);
-                padding: 0px 12px; 
-                border-radius: 16px; 
-                box-shadow: 0 2px 10px rgba(0,0,0,0.15); 
-                display: flex; 
-                flex-direction: row; 
-                align-items: center; 
-                gap: 10px; 
-                width: 94%; 
-                max-width: 650px; 
-                height: 32px;
-                box-sizing: border-box;
-            }}
-            
-            #playBtn {{ background: #4f46e5; border: none; color: white; width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
-                       font-size: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
-            #playBtn:hover {{ background: #4338ca; }}
-            
-            .slider-container {{ flex-grow: 1; display: flex; align-items: center; height: 100%; }}
-            
-            /* Squeezed slider elements */
-            input[type="range"] {{ -webkit-appearance: none; width: 100%; background: transparent; cursor: pointer; margin: 0; height: 12px; }}
-            input[type="range"]:focus {{ outline: none; }}
-            input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #4f46e5; 
-                                                         margin-top: -4px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); border: 1.5px solid #fff; }}
-            input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: #cbd5e1; border-radius: 2px; }}
-            
-            #time-display {{ font-size: 13px; font-weight: 700; color: #0f172a; min-width: 170px; text-align: right; white-space: nowrap; letter-spacing: -0.2px; }}
-            
-            #loading-overlay {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.9); 
-                                display: flex; align-items: center; justify-content: center; z-index: 10000; font-size: 18px; font-weight: bold;
-                                color: #334155; transition: opacity 0.4s ease-out; }}
-            #loading-overlay.hidden {{ opacity: 0; pointer-events: none; }}
-            
-            /* Zoom controls pushed down out of the way */
-            .leaflet-top.leaflet-right {{ top: 45px; right: 20px; }}
-        </style>
-    </head>
-    <body>
-        <div id="loading-overlay">Initializing Map…</div>
-        
-        <div id="map-container">
-            <div id="map"></div>
-            
-            <div id="controls-wrapper">
-                <button id="playBtn">&#9654;</button>
-                <div class="slider-container">
-                    <input type="range" id="slider" min="0" max="{len(radar_frames) - 1}" value="0">
-                </div>
-                <div id="time-display">Loading...</div>
-            </div>
-        </div>
+    map_placeholder = st.empty()
     
-        <script>
-            const frames = [{js_frames_array}];
-            const totalFrames = frames.length;
-            
-            // The full bounding box required to stretch the HRRR image correctly
-            const activeBounds = {MAP_BOUNDS};
-            
-            // A tighter, zoomed-in bounding box specifically for the initial camera view.
-            // This crops out deep Mexico/Canada and forces the US to fill the screen edge-to-edge.
-            // The 50.0 lat aligns perfectly with Winnipeg/the top of the HRRR data.
-            const viewBounds = [[25.0, -125.0], [50.0, -66.0]];
-            
-            const map = L.map('map', {{ 
-                zoomControl: false, 
-                minZoom: 4, 
-                maxZoom: 10, 
-                zoomSnap: 0,
-                maxBounds: activeBounds,
-                maxBoundsViscosity: 0.8 
-            }});
-            
-            // Fit the camera to the zoomed-in US bounds instead of the entire padded image bounds
-            map.fitBounds(viewBounds);
-            
-            L.control.zoom({{ position: 'topright' }}).addTo(map);
+    # Step 1: Instantly load and display the live frame
+    live_frame = fetch_live_frame()
+    if live_frame:
+        initial_html = generate_map_html(live_frame, mode="live")
+        with map_placeholder:
+            components.html(initial_html, height=850)
+    else:
+        st.error("Failed to fetch live radar imagery.")
     
-            map.createPane('primaryPane');
-            map.getPane('primaryPane').style.zIndex = 410;
-            map.getPane('primaryPane').classList.add('radar-blend');
+    # Step 2: Fetch forecast frames in background
+    forecast_frames = fetch_forecast_frames()
     
-            L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '&copy; CARTO' }}).addTo(map);
-            
-            // The image itself still uses the full activeBounds so it doesn't get distorted
-            let primaryLayer = L.imageOverlay('', activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
-            
-            const slider = document.getElementById('slider');
-            const timeDisplay = document.getElementById('time-display');
-            const playBtn = document.getElementById('playBtn');
-            const loadingOverlay = document.getElementById('loading-overlay');
-    
-            let timer = null;
-            let isPlaying = false;
-    
-            function drawFrame(index) {{
-                if (!frames[index]) return;
-                
-                let targetFrame = frames[index];
-                primaryLayer.setUrl(targetFrame.img);
-                timeDisplay.innerText = targetFrame.time;
-            }}
-    
-            function nextFrame() {{ 
-                let n = parseInt(slider.value) + 1; 
-                if (n > totalFrames - 1) n = 0; 
-                slider.value = n; 
-                drawFrame(n); 
-            }}
-            
-            function prevFrame() {{ 
-                let n = parseInt(slider.value) - 1; 
-                if (n < 0) n = totalFrames - 1; 
-                slider.value = n; 
-                drawFrame(n); 
-            }}
-    
-            playBtn.onclick = () => {{
-                if (isPlaying) {{ 
-                    clearInterval(timer); 
-                    playBtn.innerHTML = "&#9654;"; // Play icon
-                    isPlaying = false; 
-                }} else {{ 
-                    timer = setInterval(nextFrame, 450); 
-                    playBtn.innerHTML = "&#10074;&#10074;"; // Pause icon
-                    isPlaying = true; 
-                }}
-            }};
-            
-            slider.oninput = (e) => {{ 
-                if (isPlaying) playBtn.click(); 
-                drawFrame(e.target.value); 
-            }};
-    
-            document.addEventListener('keydown', (e) => {{
-                if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
-                if (e.code === 'Space') {{ e.preventDefault(); playBtn.click(); }}
-                else if (e.code === 'ArrowLeft') {{ e.preventDefault(); if (isPlaying) playBtn.click(); prevFrame(); }}
-                else if (e.code === 'ArrowRight') {{ e.preventDefault(); if (isPlaying) playBtn.click(); nextFrame(); }}
-            }});
-    
-            // Initialize
-            drawFrame(0);
-            
-            // Wait for map to settle before hiding overlay
-            map.whenReady(() => {{
-                setTimeout(() => {{
-                    loadingOverlay.classList.add('hidden');
-                    if (totalFrames > 1) playBtn.click();
-                }}, 600);
-            }});
-            
-        </script>
-    </body>
-    </html>
-    """
-    
-    components.html(html_code, height=850)
+    # Step 3: Combine and execute the seamless UI swap
+    all_frames = live_frame + forecast_frames
+    if len(all_frames) > 1:
+        full_html = generate_map_html(all_frames, mode="forecast")
+        with map_placeholder:
+            components.html(full_html, height=850)
 
 # --- App Render ---
 render_flipbook()
