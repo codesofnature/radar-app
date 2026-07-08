@@ -618,12 +618,13 @@ def generate_map_html(radar_frames, mode="live"):
             
             #time-display {{
                 top: 8px;
-                padding: 7px 14px;
-                font-size: 14px;
+                padding: 6px 12px;
+                font-size: 12px;
                 border-radius: 10px;
-                max-width: 42vw;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                max-width: 56vw;
+                white-space: normal;
+                line-height: 1.3;
+                text-align: center;
             }}
             
             #left-controls {{
