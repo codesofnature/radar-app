@@ -198,6 +198,17 @@ def generate_temp_overlay(target_dt, om_data):
         
         colors[:, :, 3] = 45
         
+        # Thin, half-transparent black border along each contour (band) boundary,
+        # since `norm` is floored into 10 discrete steps above, creating stepped
+        # temperature bands -- outline where adjacent pixels land in different bands.
+        edge = np.zeros(norm.shape, dtype=bool)
+        edge[1:, :] |= norm[1:, :] != norm[:-1, :]
+        edge[:-1, :] |= norm[1:, :] != norm[:-1, :]
+        edge[:, 1:] |= norm[:, 1:] != norm[:, :-1]
+        edge[:, :-1] |= norm[:, 1:] != norm[:, :-1]
+        
+        colors[edge] = [0, 0, 0, 130]
+        
         final_img = Image.fromarray(colors, mode="RGBA")
         buf = io.BytesIO()
         final_img.save(buf, format="PNG", optimize=True)
@@ -365,21 +376,23 @@ def generate_map_html(radar_frames, mode="live"):
 <!DOCTYPE html>
 <html>
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.8.0/suncalc.min.js"></script>
     <style>
+        * {{ -webkit-tap-highlight-color: transparent; box-sizing: border-box; }}
+        html, body {{ -webkit-text-size-adjust: 100%; touch-action: manipulation; }}
         body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }}
-        #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }}
+        #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; height: 100dvh; }}
         #map {{ width: 100%; height: 100%; background: transparent; }}
         .radar-blend {{ mix-blend-mode: multiply; }}
         .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
         
         .temp-label {{
-            font-size: 15px;
+            font-size: 12px;
             font-weight: 900;
-            text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff,
-                         0 0 4px rgba(0,0,0,0.35);
+            text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
             text-align: center;
             pointer-events: none;
             margin-top: -8px;
@@ -457,14 +470,16 @@ def generate_map_html(radar_frames, mode="live"):
             border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; 
             align-items: center; justify-content: center; flex-shrink: 0; 
             transition: background 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); 
+            touch-action: manipulation;
         }}
         #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
         #playBtn:disabled {{ background: #94a3b8; cursor: wait; }}
         .slider-container {{ position: relative; width: 20px; height: 250px; }}
         input[type="range"] {{ 
             -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; 
-            position: absolute; width: 250px; height: 20px; top: 50%; left: 50%;
+            position: absolute; width: 250px; height: 28px; top: 50%; left: 50%;
             transform: translate(-50%, -50%) rotate(-90deg);
+            touch-action: manipulation;
         }}
         input[type="range"]:focus {{ outline: none; }}
         input[type="range"]::-webkit-slider-thumb {{ 
@@ -585,6 +600,74 @@ def generate_map_html(radar_frames, mode="live"):
         @keyframes moonGlow {{
             0%, 100% {{ opacity: 0.7; }}
             50% {{ opacity: 1; }}
+        }}
+        
+        /* --- Mobile (iPhone-width) layout --- */
+        @media (max-width: 600px) {{
+            #layer-selector {{
+                left: 8px;
+                top: 8px;
+                padding: 8px 12px;
+                gap: 8px;
+                font-size: 12px;
+                border-radius: 10px;
+                max-width: 44vw;
+            }}
+            .radio-label {{ gap: 6px; padding: 4px 0; }}
+            .radio-label input[type="radio"] {{ width: 18px; height: 18px; }}
+            
+            #time-display {{
+                top: 8px;
+                padding: 7px 14px;
+                font-size: 14px;
+                border-radius: 10px;
+                max-width: 42vw;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }}
+            
+            #left-controls {{
+                left: 6px;
+                padding: 10px 8px;
+                gap: 14px;
+                border-radius: 14px;
+            }}
+            #playBtn {{
+                width: 44px;
+                height: 44px;
+                font-size: 16px;
+            }}
+            .slider-container {{ width: 24px; height: 150px; }}
+            input[type="range"] {{ width: 150px; height: 36px; }}
+            input[type="range"]::-webkit-slider-thumb {{
+                height: 24px; width: 24px; margin-top: -10px;
+            }}
+            input[type="range"]::-webkit-slider-runnable-track {{ height: 5px; }}
+            
+            #sun-indicator {{
+                width: 64px;
+                height: 64px;
+                bottom: 12px;
+                left: 12px;
+            }}
+            #moon-indicator {{
+                width: 56px;
+                height: 56px;
+                bottom: 12px;
+                right: 12px;
+            }}
+            
+            .temp-label {{ font-size: 10px; }}
+            
+            .leaflet-top.leaflet-right {{ top: 8px; right: 8px; }}
+            .leaflet-touch .leaflet-bar a {{
+                width: 40px !important;
+                height: 40px !important;
+                line-height: 40px !important;
+                font-size: 18px !important;
+            }}
+            
+            #loading-overlay {{ font-size: 15px; padding: 0 20px; text-align: center; }}
         }}
     </style>
 </head>
@@ -829,7 +912,7 @@ def render_flipbook():
     if live_frame:
         initial_html = generate_map_html(live_frame, mode="live")
         with map_placeholder:
-            components.html(initial_html, height=850)
+            components.html(initial_html, height=700)
     else:
         st.error("Failed to fetch live radar imagery.")
     
@@ -839,6 +922,6 @@ def render_flipbook():
     if len(all_frames) > 1:
         full_html = generate_map_html(all_frames, mode="forecast")
         with map_placeholder:
-            components.html(full_html, height=850)
+            components.html(full_html, height=700)
 
 render_flipbook()
