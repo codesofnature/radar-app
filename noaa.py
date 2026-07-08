@@ -32,7 +32,9 @@ st.markdown("""
 # --- Configuration ---
 LOCAL_TZ = ZoneInfo("America/New_York")
 
-BBOX = "-14200000,2700000,-7200000,6400000"
+# Updated BBOX to match the 1200x700 aspect ratio perfectly.
+# Top edge is set to ~50.05°N (Winnipeg), removing the wasted Canada space.
+BBOX = "-14000000,2630000,-7400000,6480000"
 WIDTH = 1200
 HEIGHT = 700
 RADAR_RES_FACTOR = 1.5
@@ -179,27 +181,27 @@ def render_flipbook():
             /* Ultra-thin controls anchored precisely to the top edge */
             #controls-wrapper {{ 
                 position: absolute; 
-                top: 8px; 
+                top: 6px; 
                 left: 50%; 
                 transform: translateX(-50%); 
                 z-index: 9999; 
                 background: rgba(255, 255, 255, 0.95); 
                 backdrop-filter: blur(8px);
                 -webkit-backdrop-filter: blur(8px);
-                padding: 0px 14px; 
-                border-radius: 20px; 
+                padding: 0px 12px; 
+                border-radius: 16px; 
                 box-shadow: 0 2px 10px rgba(0,0,0,0.15); 
                 display: flex; 
                 flex-direction: row; 
                 align-items: center; 
-                gap: 12px; 
+                gap: 10px; 
                 width: 94%; 
                 max-width: 650px; 
-                height: 34px;
+                height: 32px;
                 box-sizing: border-box;
             }}
             
-            #playBtn {{ background: #4f46e5; border: none; color: white; width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+            #playBtn {{ background: #4f46e5; border: none; color: white; width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
                        font-size: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
             #playBtn:hover {{ background: #4338ca; }}
             
@@ -242,32 +244,25 @@ def render_flipbook():
             const frames = [{js_frames_array}];
             const totalFrames = frames.length;
             
-            // The full bounding box required to map the HRRR image correctly
+            // The full bounding box required to stretch the HRRR image correctly
             const activeBounds = {MAP_BOUNDS};
-            const latMax = activeBounds[1][0]; // Exact top edge of the radar data
             
-            // A hard barrier preventing the user from panning into Canada above the radar data.
-            // Adds just a tiny fraction (0.05) buffer so the image isn't cut off abruptly.
-            const strictMaxBounds = [[20.0, -135.0], [latMax + 0.05, -60.0]];
+            // A tighter, zoomed-in bounding box specifically for the initial camera view.
+            // This crops out deep Mexico/Canada and forces the US to fill the screen edge-to-edge.
+            // The 50.0 lat aligns perfectly with Winnipeg/the top of the HRRR data.
+            const viewBounds = [[25.0, -125.0], [50.0, -66.0]];
             
             const map = L.map('map', {{ 
                 zoomControl: false, 
                 minZoom: 4, 
                 maxZoom: 10, 
                 zoomSnap: 0,
-                maxBounds: strictMaxBounds,
-                maxBoundsViscosity: 1.0 
+                maxBounds: activeBounds,
+                maxBoundsViscosity: 0.8 
             }});
             
-            // HACK: By passing a vertical line with the same longitudes, Leaflet is forced 
-            // to fit the map by HEIGHT instead of width. We fit from mid-US (Lat 36) to 
-            // the exact top of the radar data (latMax). 
-            // This guarantees the map opens tightly zoomed exactly like your second picture, 
-            // regardless of how wide the car screen is.
-            const viewBounds = [[36.0, -96.0], [latMax, -96.0]];
-            
-            // We add a 40px top padding so the top of the radar data clears the UI pill.
-            map.fitBounds(viewBounds, {{ paddingTopLeft: [0, 40] }});
+            // Fit the camera to the zoomed-in US bounds instead of the entire padded image bounds
+            map.fitBounds(viewBounds);
             
             L.control.zoom({{ position: 'topright' }}).addTo(map);
     
@@ -277,6 +272,7 @@ def render_flipbook():
     
             L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '&copy; CARTO' }}).addTo(map);
             
+            // The image itself still uses the full activeBounds so it doesn't get distorted
             let primaryLayer = L.imageOverlay('', activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
             
             const slider = document.getElementById('slider');
