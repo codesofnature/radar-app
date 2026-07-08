@@ -1,1 +1,6 @@
+streamlit
 requests
+xarray
+cfgrib
+numpy
+Pillow
