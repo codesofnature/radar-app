@@ -18,10 +18,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # --- Page Config ---
-# 'wide' layout and collapsed sidebar help maximize screen real estate
 st.set_page_config(page_title="Instant Radar", layout="wide", page_icon="⚡", initial_sidebar_state="collapsed")
 
-# Hide Streamlit's default header/footer for a true fullscreen app feel
 st.markdown("""
     <style>
         #MainMenu {visibility: hidden;}
@@ -56,7 +54,6 @@ lat_max, lon_max = mercator_to_latlon(xmax, ymax)
 MAP_BOUNDS = f"[[{lat_min}, {lon_min}], [{lat_max}, {lon_max}]]"
 
 def process_radar_image(img_bytes):
-    """Applies the 3-Tier color filter on the server side using numpy."""
     try:
         img = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
         data = np.array(img)
@@ -179,48 +176,51 @@ def render_flipbook():
             
             .radar-blend {{ mix-blend-mode: multiply; }}
             
-            /* Floating controls overlay */
+            /* Ultra-thin controls anchored precisely to the top edge */
             #controls-wrapper {{ 
                 position: absolute; 
-                top: 20px; 
+                top: 8px; 
                 left: 50%; 
                 transform: translateX(-50%); 
                 z-index: 9999; 
-                background: rgba(255, 255, 255, 0.9); 
+                background: rgba(255, 255, 255, 0.95); 
                 backdrop-filter: blur(8px);
                 -webkit-backdrop-filter: blur(8px);
-                padding: 10px 20px; 
-                border-radius: 40px; 
-                box-shadow: 0 4px 20px rgba(0,0,0,0.15); 
+                padding: 0px 14px; 
+                border-radius: 20px; 
+                box-shadow: 0 2px 10px rgba(0,0,0,0.15); 
                 display: flex; 
                 flex-direction: row; 
                 align-items: center; 
-                gap: 15px; 
-                width: 90%; 
-                max-width: 600px; 
+                gap: 12px; 
+                width: 94%; 
+                max-width: 650px; 
+                height: 34px;
+                box-sizing: border-box;
             }}
             
-            #playBtn {{ background: #2563eb; border: none; color: white; width: 40px; height: 40px; border-radius: 50%; cursor: pointer;
-                       font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
-            #playBtn:hover {{ background: #1d4ed8; }}
+            #playBtn {{ background: #4f46e5; border: none; color: white; width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+                       font-size: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }}
+            #playBtn:hover {{ background: #4338ca; }}
             
-            .slider-container {{ flex-grow: 1; display: flex; align-items: center; }}
+            .slider-container {{ flex-grow: 1; display: flex; align-items: center; height: 100%; }}
             
-            input[type="range"] {{ -webkit-appearance: none; width: 100%; background: transparent; cursor: pointer; margin: 0; height: 24px; }}
+            /* Squeezed slider elements */
+            input[type="range"] {{ -webkit-appearance: none; width: 100%; background: transparent; cursor: pointer; margin: 0; height: 12px; }}
             input[type="range"]:focus {{ outline: none; }}
-            input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #2563eb; 
-                                                         margin-top: -7px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); border: 2px solid #fff; }}
-            input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 6px; background: #cbd5e1; border-radius: 3px; }}
+            input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 12px; width: 12px; border-radius: 50%; background: #4f46e5; 
+                                                         margin-top: -4px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); border: 1.5px solid #fff; }}
+            input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: #cbd5e1; border-radius: 2px; }}
             
-            #time-display {{ font-size: 16px; font-weight: 700; color: #0f172a; min-width: 220px; text-align: right; white-space: nowrap; letter-spacing: -0.3px; }}
+            #time-display {{ font-size: 13px; font-weight: 700; color: #0f172a; min-width: 170px; text-align: right; white-space: nowrap; letter-spacing: -0.2px; }}
             
             #loading-overlay {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.9); 
                                 display: flex; align-items: center; justify-content: center; z-index: 10000; font-size: 18px; font-weight: bold;
                                 color: #334155; transition: opacity 0.4s ease-out; }}
             #loading-overlay.hidden {{ opacity: 0; pointer-events: none; }}
             
-            /* Move Leaflet zoom controls down so they don't hit our floating pill */
-            .leaflet-top.leaflet-right {{ top: 80px; right: 10px; }}
+            /* Zoom controls pushed down out of the way */
+            .leaflet-top.leaflet-right {{ top: 45px; right: 20px; }}
         </style>
     </head>
     <body>
@@ -241,16 +241,33 @@ def render_flipbook():
         <script>
             const frames = [{js_frames_array}];
             const totalFrames = frames.length;
+            
+            // The full bounding box required to map the HRRR image correctly
             const activeBounds = {MAP_BOUNDS};
+            const latMax = activeBounds[1][0]; // Exact top edge of the radar data
+            
+            // A hard barrier preventing the user from panning into Canada above the radar data.
+            // Adds just a tiny fraction (0.05) buffer so the image isn't cut off abruptly.
+            const strictMaxBounds = [[20.0, -135.0], [latMax + 0.05, -60.0]];
             
             const map = L.map('map', {{ 
                 zoomControl: false, 
                 minZoom: 4, 
                 maxZoom: 10, 
                 zoomSnap: 0,
-                maxBounds: activeBounds,
+                maxBounds: strictMaxBounds,
                 maxBoundsViscosity: 1.0 
-            }}).fitBounds(activeBounds);
+            }});
+            
+            // HACK: By passing a vertical line with the same longitudes, Leaflet is forced 
+            // to fit the map by HEIGHT instead of width. We fit from mid-US (Lat 36) to 
+            // the exact top of the radar data (latMax). 
+            // This guarantees the map opens tightly zoomed exactly like your second picture, 
+            // regardless of how wide the car screen is.
+            const viewBounds = [[36.0, -96.0], [latMax, -96.0]];
+            
+            // We add a 40px top padding so the top of the radar data clears the UI pill.
+            map.fitBounds(viewBounds, {{ paddingTopLeft: [0, 40] }});
             
             L.control.zoom({{ position: 'topright' }}).addTo(map);
     
@@ -332,7 +349,6 @@ def render_flipbook():
     </html>
     """
     
-    # Render at a large height to trigger fullscreen behavior on the device
     components.html(html_code, height=850)
 
 # --- App Render ---
