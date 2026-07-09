@@ -27,6 +27,7 @@ st.markdown("""
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+.terrain-blend { mix-blend-mode: multiply; opacity: 0.65; }
 .block-container {
     padding: 0rem !important;
     max-width: 100% !important;
@@ -386,76 +387,41 @@ body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-syst
     text-align: center;
     pointer-events: none;
     margin-top: -8px;
-    
-    /* Softer, tighter shadow to support thinner text without blurring it */
-    text-shadow: 
-        0px 1px 2px rgba(0, 0, 0, 0.8),
-        0px 0px 3px rgba(0, 0, 0, 0.5);
+    text-shadow: 0px 1px 2px rgba(0, 0, 0, 0.8), 0px 0px 3px rgba(0, 0, 0, 0.5);
 }}
 #layer-selector {{
-    position: absolute;
-    left: 15px;
-    top: 15px;
-    z-index: 9999;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    padding: 12px 18px;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    font-size: 15px;
-    font-weight: 700;
-    color: #0f172a;
+    position: absolute; left: 25px; bottom: 25px; z-index: 9999;
+    background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); padding: 12px 18px; border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column;
+    gap: 12px; font-size: 15px; font-weight: 700; color: #0f172a;
 }}
-.radio-label {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-}}
-.radio-label input[type="radio"] {{
-    accent-color: #4f46e5;
-    cursor: pointer;
-    width: 32px;
-    height: 32px;
-}}
+.radio-label {{ display: flex; align-items: center; gap: 8px; cursor: pointer; }}
+.radio-label input[type="radio"] {{ accent-color: #4f46e5; cursor: pointer; width: 32px; height: 32px; }}
 #time-display {{
-    position: absolute;
-    top: 15px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 9999;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    padding: 10px 24px;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-    font-size: 22px;
-    font-weight: 800;
-    color: #0f172a;
-    white-space: nowrap;
-    letter-spacing: -0.5px;
+    position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 9999;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.15) 100%);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-top: 2px solid rgba(255, 255, 255, 0.9); border-left: 2px solid rgba(255, 255, 255, 0.6);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2); border-right: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.25), 0 5px 15px rgba(0, 0, 0, 0.15),
+                inset 0 3px 5px rgba(255, 255, 255, 0.9), inset 0 -3px 5px rgba(0, 0, 0, 0.08);
+    padding: 10px 24px; border-radius: 16px; font-size: 22px; font-weight: 800;
+    color: #0f172a; white-space: nowrap; letter-spacing: -0.5px;
+    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.9); overflow: hidden; 
 }}
+#time-display::after {{
+    content: ""; position: absolute; top: 0; left: -100%; width: 50%; height: 100%;
+    background: linear-gradient(to right, rgba(255,255,255,0) 0%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0) 100%);
+    transform: skewX(-25deg); animation: glassGlare 6s infinite; pointer-events: none;
+}}
+@keyframes glassGlare {{ 0% {{ left: -100%; }} 15% {{ left: 200%; }} 100% {{ left: 200%; }} }}
 #left-controls {{
-    position: absolute;
-    left: 15px;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 9999;
-    background: rgba(255, 255, 255, 0.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    padding: 15px 12px;
-    border-radius: 16px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 25px;
+    position: absolute; left: 15px; top: 50%; transform: translateY(-50%); z-index: 9999;
+    background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); padding: 15px 12px; border-radius: 16px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column;
+    align-items: center; gap: 25px;
 }}
 #playBtn {{
     background: #4f46e5; border: none; color: white; width: 34px; height: 34px;
@@ -488,106 +454,27 @@ body.forecast-mode.loaded {{ opacity: 1; }}
 body.forecast-mode #loading-overlay {{ display: none !important; }}
 
 /* --- NASA-Quality Sun Indicator --- */
-#sun-indicator {{
-    position: absolute;
-    bottom: 25px;
-    left: 25px;
-    z-index: 9999;
-    width: 120px;
-    height: 120px;
-    transition: opacity 0.5s ease, transform 0.5s ease;
-    pointer-events: none;
-    opacity: 0;
-}}
-.sun-image-container {{
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    overflow: hidden;
-    animation: sunPulse 4s ease-in-out infinite;
-}}
-.sun-image {{
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-    transform: scale(1.4);
-    filter: drop-shadow(0 0 30px rgba(255, 200, 0, 0.9))
-            drop-shadow(0 0 60px rgba(255, 140, 0, 0.6))
-            drop-shadow(0 0 90px rgba(255, 69, 0, 0.4));
-}}
-.sun-glow {{
-    position: absolute;
-    top: -30%;
-    left: -30%;
-    width: 160%;
-    height: 160%;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255, 200, 0, 0.5) 0%, rgba(255, 140, 0, 0.3) 40%, transparent 70%);
-    animation: glowPulse 3s ease-in-out infinite;
-    pointer-events: none;
-}}
-@keyframes sunPulse {{
-    0%, 100% {{ transform: scale(1) rotate(0deg); }}
-    50% {{ transform: scale(1.08) rotate(2deg); }}
-}}
-@keyframes glowPulse {{
-    0%, 100% {{ opacity: 0.6; transform: scale(1); }}
-    50% {{ opacity: 1; transform: scale(1.1); }}
-}}
+#sun-indicator {{ position: absolute; top: 25px; left: 25px; z-index: 9999; width: 120px; height: 120px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
+.sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
+.sun-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; transform: scale(1.4); filter: drop-shadow(0 0 30px rgba(255, 200, 0, 0.9)) drop-shadow(0 0 60px rgba(255, 140, 0, 0.6)) drop-shadow(0 0 90px rgba(255, 69, 0, 0.4)); }}
+.sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255, 200, 0, 0.5) 0%, rgba(255, 140, 0, 0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; pointer-events: none; }}
+@keyframes sunPulse {{ 0%, 100% {{ transform: scale(1) rotate(0deg); }} 50% {{ transform: scale(1.08) rotate(2deg); }} }}
+@keyframes glowPulse {{ 0%, 100% {{ opacity: 0.6; transform: scale(1); }} 50% {{ opacity: 1; transform: scale(1.1); }} }}
 
 /* --- NASA-Quality Moon Indicator --- */
-#moon-indicator {{
-    position: absolute;
-    bottom: 25px;
-    right: 25px;
-    z-index: 9999;
-    width: 100px;
-    height: 100px;
-    transition: opacity 0.5s ease;
-    pointer-events: none;
-}}
-.moon-image-container {{
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    overflow: hidden;
-    box-shadow: 0 0 25px 8px rgba(200, 200, 255, 0.5),
-                0 0 50px 15px rgba(150, 150, 200, 0.3);
-}}
-.moon-image {{
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-}}
-.moon-phase-shadow {{
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: #0a0a1a;
-    border-radius: 50%;
-    transition: clip-path 0.5s ease;
-}}
-.moon-glow {{
-    position: absolute;
-    top: -20%;
-    left: -20%;
-    width: 140%;
-    height: 140%;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(200, 200, 255, 0.4) 0%, transparent 60%);
-    pointer-events: none;
-    animation: moonGlow 5s ease-in-out infinite;
-}}
-@keyframes moonGlow {{
-    0%, 100% {{ opacity: 0.7; }}
-    50% {{ opacity: 1; }}
-}}
+#moon-indicator {{ position: absolute; bottom: 25px; right: 25px; z-index: 9999; width: 100px; height: 100px; transition: opacity 0.5s ease; pointer-events: none; }}
+.moon-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 25px 8px rgba(200, 200, 255, 0.5), 0 0 50px 15px rgba(150, 150, 200, 0.3); }}
+.moon-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }}
+.moon-phase-shadow {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a1a; border-radius: 50%; transition: clip-path 0.5s ease; }}
+.moon-glow {{ position: absolute; top: -20%; left: -20%; width: 140%; height: 140%; border-radius: 50%; background: radial-gradient(circle, rgba(200, 200, 255, 0.4) 0%, transparent 60%); pointer-events: none; animation: moonGlow 5s ease-in-out infinite; }}
+@keyframes moonGlow {{ 0%, 100% {{ opacity: 0.7; }} 50% {{ opacity: 1; }} }}
+
+/* --- AIRPLANE ANIMATION CSS --- */
+.plane-icon-container {{ pointer-events: none; }}
+#flying-plane {{ width: 100%; height: 100%; transition: transform 4s ease-out, filter 4s ease-out; }}
+.plane-taking-off {{ transform: scale(0.3); filter: drop-shadow(0px 1px 1px rgba(0,0,0,0.9)); }}
+.plane-flying {{ transform: scale(1.1); filter: drop-shadow(-15px 25px 12px rgba(0,0,0,0.6)); }}
+
 </style>
 </head>
 <body class="{'forecast-mode' if is_forecast else 'live-mode'}">
@@ -595,12 +482,9 @@ body.forecast-mode #loading-overlay {{ display: none !important; }}
 <div id="map-container">
     <div id="map"></div>
     <div id="layer-selector">
-        <label class="radio-label">
-            <input type="radio" name="layerMode" value="radar" checked onchange="setLayerMode('radar')"> ☁️ 🌡 💦  
-        </label>
-        <label class="radio-label">
-            <input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')"> ☁️ 🌡 💦 🌍
-        </label>
+        <label class="radio-label"><input type="radio" name="layerMode" value="pure_radar" checked onchange="setLayerMode('pure_radar')"> 📡</label>
+        <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')"> ☁️  </label>
+        <label class="radio-label"><input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')"> 🌍</label>
     </div>
     <div id="time-display">Loading...</div>
     <div id="left-controls">
@@ -616,7 +500,7 @@ body.forecast-mode #loading-overlay {{ display: none !important; }}
 const frames = [{js_frames_array}];
 const totalFrames = frames.length;
 const isLiveMode = {str(not is_forecast).lower()};
-let currentMode = 'radar';
+let currentMode = 'pure_radar';
 
 const activeBounds = {MAP_BOUNDS};
 const viewBounds = [[24.0, -125.0], [50.0, -66.0]];
@@ -624,33 +508,25 @@ const erieLat = 42.1292;
 const erieLon = -80.0851;
 
 const map = L.map('map', {{
-    zoomControl: false,
-    minZoom: 4,
-    maxZoom: 10,
-    zoomSnap: 0,
-    maxBounds: activeBounds,
-    maxBoundsViscosity: 0.8
+    zoomControl: false, minZoom: 4, maxZoom: 10, zoomSnap: 0,
+    maxBounds: activeBounds, maxBoundsViscosity: 0.8
 }});
 map.fitBounds(viewBounds);
 L.control.zoom({{ position: 'topright' }}).addTo(map);
 
-L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '&copy; CARTO' }}).addTo(map);
+// The deep ocean basemap setup
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{{z}}/{{y}}/{{x}}', {{ attribution: '&copy; Esri' }}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{{z}}/{{y}}/{{x}}', {{ opacity: 0.4, attribution: '&copy; Esri' }}).addTo(map);
+L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '&copy; CARTO' }}).addTo(map);
 
-map.createPane('primaryPane');
-map.getPane('primaryPane').style.zIndex = 410;
-map.getPane('primaryPane').classList.add('radar-blend');
+map.createPane('primaryPane'); map.getPane('primaryPane').style.zIndex = 410; map.getPane('primaryPane').classList.add('radar-blend');
 let primaryLayer = L.imageOverlay('', activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
 
-map.createPane('tempPane');
-map.getPane('tempPane').style.zIndex = 420;
-map.getPane('tempPane').style.pointerEvents = 'none';
+map.createPane('tempPane'); map.getPane('tempPane').style.zIndex = 420; map.getPane('tempPane').style.pointerEvents = 'none';
 let tempOverlayLayer = L.imageOverlay('', activeBounds, {{pane: 'tempPane', opacity: 1.0, interactive: false}});
 
 const tempLabelsGroup = L.layerGroup();
 let labelMarkers = [];
-
-// Initialize layers based on default mode ('radar')
-tempLabelsGroup.addTo(map); 
 
 const slider = document.getElementById('slider');
 const timeDisplay = document.getElementById('time-display');
@@ -667,22 +543,10 @@ function tempToColor(fahrenheit) {{
     let norm = Math.min(1, Math.max(0, (fahrenheit - 20) / 100.0));
     norm = Math.floor(norm * 10) / 10.0;
     let r = 0, g = 0, b = 0;
-    if (norm < 0.25) {{
-        const f1 = norm / 0.25;
-        b = 139 + 116 * f1;
-    }} else if (norm < 0.50) {{
-        const f2 = (norm - 0.25) / 0.25;
-        g = 255 * f2;
-        b = 255 - 255 * f2;
-    }} else if (norm < 0.75) {{
-        const f3 = (norm - 0.50) / 0.25;
-        r = 255 * f3;
-        g = 255 - 115 * f3;
-    }} else {{
-        const f4 = (norm - 0.75) / 0.25;
-        r = 255 - 116 * f4;
-        g = 140 - 140 * f4;
-    }}
+    if (norm < 0.25) {{ b = 139 + 116 * (norm / 0.25); }}
+    else if (norm < 0.50) {{ g = 255 * ((norm - 0.25) / 0.25); b = 255 - 255 * ((norm - 0.25) / 0.25); }}
+    else if (norm < 0.75) {{ r = 255 * ((norm - 0.50) / 0.25); g = 255 - 115 * ((norm - 0.50) / 0.25); }}
+    else {{ r = 255 - 116 * ((norm - 0.75) / 0.25); g = 140 - 140 * ((norm - 0.75) / 0.25); }}
     return `rgb(${{Math.round(r)}}, ${{Math.round(g)}}, ${{Math.round(b)}})`;
 }}
 
@@ -692,8 +556,7 @@ function updateLabels(gridData) {{
             let icon = L.divIcon({{
                 className: 'temp-label',
                 html: `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.15em;">/${{pt.hum}}</span></span>`,
-                iconSize: [50, 20],
-                iconAnchor: [25, 10]
+                iconSize: [50, 20], iconAnchor: [25, 10]
             }});
             let marker = L.marker([pt.lat, pt.lon], {{icon: icon, interactive: false}});
             labelMarkers.push(marker);
@@ -701,9 +564,7 @@ function updateLabels(gridData) {{
         }});
     }} else {{
         gridData.forEach((pt, i) => {{
-            if (labelMarkers[i]) {{
-                labelMarkers[i].getElement().innerHTML = `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.75em;">/${{pt.hum}}</span></span>`;
-            }}
+            if (labelMarkers[i]) labelMarkers[i].getElement().innerHTML = `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.75em;">/${{pt.hum}}</span></span>`;
         }});
     }}
 }}
@@ -713,108 +574,94 @@ function updateAstronomy(date) {{
     const sunAltDegrees = sunPos.altitude * (180 / Math.PI);
     if (sunAltDegrees > -5) {{
         sunIndicator.style.opacity = Math.min(1, (sunAltDegrees + 5) / 15);
-        const yOffset = Math.max(0, 30 - sunAltDegrees);
-        sunIndicator.style.transform = `translateY(${{yOffset}}px)`;
-    }} else {{
-        sunIndicator.style.opacity = 0;
-    }}
+        sunIndicator.style.transform = `translateY(${{Math.max(0, 30 - sunAltDegrees)}}px)`;
+    }} else {{ sunIndicator.style.opacity = 0; }}
 
     const moonPhaseInfo = SunCalc.getMoonIllumination(date);
-    const phase = moonPhaseInfo.phase;
-    const fraction = moonPhaseInfo.fraction;
+    const phase = moonPhaseInfo.phase, fraction = moonPhaseInfo.fraction;
     let clipPath = '';
-    if (fraction >= 0.99) {{
-        clipPath = 'circle(0% at 50% 50%)';
-    }} else if (fraction <= 0.01) {{
-        clipPath = 'circle(100% at 50% 50%)';
-    }} else {{
+    if (fraction >= 0.99) clipPath = 'circle(0% at 50% 50%)';
+    else if (fraction <= 0.01) clipPath = 'circle(100% at 50% 50%)';
+    else {{
         const shadowWidth = (1 - fraction) * 100;
-        if (phase <= 0.5) {{
-            clipPath = `ellipse(${{shadowWidth}}% 100% at 0% 50%)`;
-        }} else {{
-            clipPath = `ellipse(${{shadowWidth}}% 100% at 100% 50%)`;
-        }}
+        clipPath = phase <= 0.5 ? `ellipse(${{shadowWidth}}% 100% at 0% 50%)` : `ellipse(${{shadowWidth}}% 100% at 100% 50%)`;
     }}
-    moonShadow.style.clipPath = clipPath;
-    moonShadow.style.webkitClipPath = clipPath;
+    moonShadow.style.clipPath = clipPath; moonShadow.style.webkitClipPath = clipPath;
 }}
 
 function drawFrame(index) {{
     if (!frames[index]) return;
     primaryLayer.setUrl(frames[index].radarImg);
-    
     if (frames[index].tempImg && frames[index].tempImg.length > 50) {{
         tempOverlayLayer.setUrl(frames[index].tempImg);
         updateLabels(frames[index].tempGrid);
     }}
-    
     timeDisplay.innerText = `${{frames[index].time}}`;
-    const frameDate = new Date(frames[index].ts);
-    updateAstronomy(frameDate);
+    updateAstronomy(new Date(frames[index].ts));
 }}
 
 function setLayerMode(mode) {{
     currentMode = mode;
-    if (mode === 'radar') {{
-        map.removeLayer(tempOverlayLayer);
-        map.addLayer(tempLabelsGroup);
-    }} else if (mode === 'temp') {{
-        map.addLayer(tempOverlayLayer);
-        map.addLayer(tempLabelsGroup);
-    }}
+    if (mode === 'pure_radar') {{ map.removeLayer(tempOverlayLayer); map.removeLayer(tempLabelsGroup); }}
+    else if (mode === 'radar') {{ map.removeLayer(tempOverlayLayer); map.addLayer(tempLabelsGroup); }}
+    else if (mode === 'temp') {{ map.addLayer(tempOverlayLayer); map.addLayer(tempLabelsGroup); }}
     drawFrame(slider.value);
 }}
 
-function nextFrame() {{
-    let n = parseInt(slider.value) + 1;
-    if (n > totalFrames - 1) n = 0;
-    slider.value = n;
-    drawFrame(n);
-}}
-
-function prevFrame() {{
-    let n = parseInt(slider.value) - 1;
-    if (n < 0) n = totalFrames - 1;
-    slider.value = n;
-    drawFrame(n);
-}}
+function nextFrame() {{ let n = parseInt(slider.value) + 1; if (n > totalFrames - 1) n = 0; slider.value = n; drawFrame(n); }}
+function prevFrame() {{ let n = parseInt(slider.value) - 1; if (n < 0) n = totalFrames - 1; slider.value = n; drawFrame(n); }}
 
 playBtn.onclick = () => {{
     if (isLiveMode) return;
-    if (isPlaying) {{
-        clearInterval(timer);
-        playBtn.innerHTML = "&#9654;";
-        isPlaying = false;
-    }} else {{
-        timer = setInterval(nextFrame, 450);
-        playBtn.innerHTML = "&#10074;&#10074;";
-        isPlaying = true;
-    }}
+    if (isPlaying) {{ clearInterval(timer); playBtn.innerHTML = "&#9654;"; isPlaying = false; }}
+    else {{ timer = setInterval(nextFrame, 450); playBtn.innerHTML = "&#10074;&#10074;"; isPlaying = true; }}
 }};
+slider.oninput = (e) => {{ if (isLiveMode) return; if (isPlaying) playBtn.click(); drawFrame(e.target.value); }};
 
-slider.oninput = (e) => {{
-    if (isLiveMode) return;
-    if (isPlaying) playBtn.click();
-    drawFrame(e.target.value);
-}};
-
-if (isLiveMode) {{
-    playBtn.innerHTML = "&#8987;";
-    playBtn.disabled = true;
-    slider.disabled = true;
-}}
-
+if (isLiveMode) {{ playBtn.innerHTML = "&#8987;"; playBtn.disabled = true; slider.disabled = true; }}
 drawFrame(0);
 
-map.whenReady(() => {{
-    if (isLiveMode) {{
-        setTimeout(() => {{ loadingOverlay.classList.add('hidden'); }}, 600);
-    }} else {{
-        setTimeout(() => {{
-            document.body.classList.add('loaded');
-            if (totalFrames > 1) playBtn.click();
-        }}, 450);
+// --- AIRPLANE ANIMATION JS ---
+const planeStart = [33.94, -118.40]; // LAX coordinates
+const planeEnd = [40.64, -73.77];    // JFK coordinates
+const dy = planeEnd[0] - planeStart[0];
+const dx = planeEnd[1] - planeStart[1];
+const planeAngle = 90 - (Math.atan2(dy, dx) * 180 / Math.PI); // Orient plane toward destination
+
+const planeSvg = `
+<div style="transform: rotate(${{planeAngle}}deg); width: 100%; height: 100%;">
+    <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><defs><linearGradient id='gloss' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%23777777'/><stop offset='0.3' stop-color='%23151515'/><stop offset='1' stop-color='%23000000'/></linearGradient></defs><path fill='url(%23gloss)' stroke='%23333333' stroke-width='5' stroke-linejoin='round' d='M256,100 L16,300 L60,320 L130,240 L190,300 L230,250 L256,280 L282,250 L322,300 L382,240 L452,320 L496,300 Z'/></svg>" id="flying-plane" class="plane-taking-off" />
+</div>`;
+
+// Shrunk the icon slightly from [50, 50] to [36, 36] for better scale
+// Shrunk the icon slightly from [50, 50] to [36, 36] for better scale
+const planeIcon = L.divIcon({{ className: 'plane-icon-container', html: planeSvg, iconSize: [36, 36], iconAnchor: [18, 18] }});
+const planeMarker = L.marker(planeStart, {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
+
+let flightStartTime = Date.now();
+const flightDuration = 18000; // Takes 18 seconds to fly across the map
+
+function animateFlight() {{
+    let now = Date.now();
+    let progress = (now - flightStartTime) / flightDuration;
+    let planeEl = document.getElementById('flying-plane');
+
+    if (progress > 1) {{
+        flightStartTime = Date.now();
+        progress = 0;
+        if (planeEl) {{ planeEl.classList.remove('plane-flying'); planeEl.classList.add('plane-taking-off'); }}
+    }} else if (progress > 0.08 && planeEl && planeEl.classList.contains('plane-taking-off')) {{
+        planeEl.classList.remove('plane-taking-off'); planeEl.classList.add('plane-flying');
     }}
+
+    planeMarker.setLatLng([planeStart[0] + dy * progress, planeStart[1] + dx * progress]);
+    requestAnimationFrame(animateFlight);
+}}
+animateFlight();
+
+map.whenReady(() => {{
+    if (isLiveMode) setTimeout(() => {{ loadingOverlay.classList.add('hidden'); }}, 600);
+    else setTimeout(() => {{ document.body.classList.add('loaded'); if (totalFrames > 1) playBtn.click(); }}, 450);
 }});
 </script>
 </body>
