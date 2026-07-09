@@ -555,7 +555,7 @@ function updateLabels(gridData) {{
         gridData.forEach(pt => {{
             let icon = L.divIcon({{
                 className: 'temp-label',
-                html: `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.15em;">/${{pt.hum}}</span></span>`,
+                html: `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.75em;">/${{pt.hum}}</span></span>`,
                 iconSize: [50, 20], iconAnchor: [25, 10]
             }});
             let marker = L.marker([pt.lat, pt.lon], {{icon: icon, interactive: false}});
@@ -564,7 +564,13 @@ function updateLabels(gridData) {{
         }});
     }} else {{
         gridData.forEach((pt, i) => {{
-            if (labelMarkers[i]) labelMarkers[i].getElement().innerHTML = `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.75em;">/${{pt.hum}}</span></span>`;
+            if (labelMarkers[i]) {{
+                let el = labelMarkers[i].getElement();
+                // ✅ FIX: Only update innerHTML if the element is actually on the map
+                if (el) {{ 
+                    el.innerHTML = `<span style="color:${{tempToColor(pt.val)}}">${{pt.val}}<span style="font-size: 0.75em;">/${{pt.hum}}</span></span>`;
+                }}
+            }}
         }});
     }}
 }}
