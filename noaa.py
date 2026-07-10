@@ -462,7 +462,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         // --- A380 PLANES (Real-world routes) ---
                 // --- A380 PLANES (Real-world routes) ---
         const a380Routes = [
-            {{ start: [33.94, -118.40], end: [40.64, -73.77], callsign: "UAE201", duration: 25000 }},
+            {{ start: [33.94, -118.40], end: [40.64, -73.77], callsign: "UAE201", duration: 425000 }},
             {{ start: [25.94, -118.40], end: [40.64, -73.77], callsign: "BAW213", duration: 118000 }}
         ];
         const planeMarkers = [];
@@ -530,14 +530,19 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         }}
         setTimeout(animatePlanes, 1000);
 
-        // --- REALISTIC DOLPHINS ---
-                const dolphinPositions = [
+       // --- REALISTIC DOLPHINS ---
+        const dolphinPositions = [
             // Gulf of Mexico (West of Florida)
-            {{ center: [27.0, -84.0], radiusLat: 1.5, radiusLon: 1.0, cycle: 60000 }},
-            // Atlantic Ocean (East of Central Florida)
-            {{ center: [29.0, -78.5], radiusLat: 1.5, radiusLon: 1.0, cycle: 45000 }},
-            // Atlantic Ocean (East of South Florida / Bahamas area)
-            {{ center: [25.0, -79.0], radiusLat: 1.2, radiusLon: 1.5, cycle: 55000 }}
+            {{ center: [27.0, -88.0], radiusLat: 1.5, radiusLon: 1.0, cycle: 60000 }},
+                     
+            // Atlantic Ocean (Near Hamilton, Bermuda)
+            {{ center: [32.0, -65.5], radiusLat: 1.2, radiusLon: 1.8, cycle: 55000 }},
+            
+            // Pacific Ocean (West of San Diego)
+            {{ center: [32.5, -125.5], radiusLat: 2.5, radiusLon: 1.2, cycle: 65000 }},
+            
+            // Atlantic Ocean (East of Central Florida - kept for balance)
+            {{ center: [29.0, -78.5], radiusLat: 1.5, radiusLon: 1.0, cycle: 45000 }}
         ];
         const dolphinMarkers = [];
         
@@ -570,12 +575,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 const lon = dm.pos.center[1] + dm.pos.radiusLon * Math.cos(angle);
                 const dLat = dm.pos.radiusLat * Math.cos(angle);
                 const dLon = -dm.pos.radiusLon * Math.sin(angle);
-                const headingDeg = 90 - (Math.atan2(dLon, dLat) * 180 / Math.PI);
+                const headingDeg = 60 - (Math.atan2(dLon, dLat) * 180 / Math.PI);
                 
                 dm.marker.setLatLng([lat, lon]);
                 const wrapper = document.getElementById(`dolphin-wrapper-${{dolphinMarkers.indexOf(dm)}}`);
                 if (wrapper) {{
-                    wrapper.style.transform = `rotate(${{headingDeg}}deg)`;
+                    //wrapper.style.transform = `rotate(${{headingDeg}}deg)`;
                     wrapper.classList.add('loaded');
                 }}
             }});
