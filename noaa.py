@@ -599,26 +599,28 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 
 def render_flipbook():
     map_placeholder = st.empty()
-
-    # Stage 0: Pure shell (zero external fetches)
-    shell_html = generate_map_html([], mode="live", include_astronomy=False)
-    with map_placeholder:
-        components.html(shell_html, height=850, scrolling=False)
-
-    # Stage 1: Live frame only (minimal data)
-    live_frame = fetch_live_frame()
-    if live_frame:
-        live_html = generate_map_html(live_frame, mode="live")
-        with map_placeholder:
-            components.html(live_html, height=850, scrolling=False)
-
-    # Stage 2: Full forecast (background fetch)
-    forecast_frames = fetch_forecast_frames()
-    all_frames = live_frame + forecast_frames
-    if all_frames:
-        full_html = generate_map_html(all_frames, mode="forecast")
-        with map_placeholder:
-            components.html(full_html, height=850, scrolling=False)
+    
+    # Show instant progress
+    with st.spinner('⚡ Loading NOAA satellite data:  National Oceanic and Atmospheric Administration...'):
+        progress_bar = st.progress(0)
+        
+        # Fetch live data
+        live_frame = fetch_live_frame()
+        progress_bar.progress(30, text="NOAA satellite data:  National Oceanic and Atmospheric Administration...")
+        
+        # Fetch forecast
+        forecast_frames = fetch_forecast_frames()
+        progress_bar.progress(100, text="Ready!")
+        
+        all_frames = (live_frame or []) + (forecast_frames or [])
+        
+        if all_frames:
+            full_html = generate_map_html(all_frames, mode="forecast")
+            with map_placeholder:
+                components.html(full_html, height=850, scrolling=False)
+        
+        time.sleep(0.5)  # Let user see "Ready!"
+        progress_bar.empty()
 
 if __name__ == "__main__":
     render_flipbook()
