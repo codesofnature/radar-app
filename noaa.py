@@ -600,27 +600,35 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 def render_flipbook():
     map_placeholder = st.empty()
     
-    # Show instant progress
-    with st.spinner('⚡ Loading NOAA satellite data:  National Oceanic and Atmospheric Administration...'):
-        progress_bar = st.progress(0)
+    # 1. INSTANT SHELL: A pure HTML/CSS spinner. No iframe destruction later.
+    map_placeholder.markdown("""
+    <div style="height: 850px; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #cce4f0; border-radius: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+        <div style="width: 50px; height: 50px; border: 5px solid #4f46e5; border-top: 5px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+        <h2 style="color: #0f172a; margin: 0;">Initializing NOAA satellite links…</h2>
+        <p style="color: #334155; margin-top: 5px;">Fetching NOAA satellite data</p>
+    </div>
+    <style>
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 2. FETCH DATA: Do this concurrently to make it as fast as possible
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future_live = executor.submit(fetch_live_frame)
+        future_forecast = executor.submit(fetch_forecast_frames)
         
-        # Fetch live data
-        live_frame = fetch_live_frame()
-        progress_bar.progress(30, text="NOAA satellite data:  National Oceanic and Atmospheric Administration...")
+        live_frame = future_live.result()
+        forecast_frames = future_forecast.result()
         
-        # Fetch forecast
-        forecast_frames = fetch_forecast_frames()
-        progress_bar.progress(100, text="Ready!")
-        
-        all_frames = (live_frame or []) + (forecast_frames or [])
-        
-        if all_frames:
-            full_html = generate_map_html(all_frames, mode="forecast")
-            with map_placeholder:
-                components.html(full_html, height=850, scrolling=False)
-        
-        time.sleep(0.5)  # Let user see "Ready!"
-        progress_bar.empty()
+    all_frames = (live_frame or []) + (forecast_frames or [])
+    
+    # 3. SINGLE RENDER: Replace the spinner with the map exactly ONCE.
+    if all_frames:
+        full_html = generate_map_html(all_frames, mode="forecast")
+        with map_placeholder:
+            components.html(full_html, height=850, scrolling=False)
+    else:
+        map_placeholder.error("Failed to load radar data. Please refresh.")
 
 if __name__ == "__main__":
     render_flipbook()
