@@ -326,14 +326,14 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         
         .leaflet-top.leaflet-right {{ top: 15px; right: 15px; }}
         
-        #sun-indicator {{ position: absolute; top: 25px; left: 25px; z-index: 9999; width: 120px; height: 120px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
+        #sun-indicator {{ position: absolute; top: 25px; left: 25px; z-index: 9999; width: 80px; height: 80px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
         .sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
         .sun-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; transform: scale(1.4); filter: drop-shadow(0 0 30px rgba(255,200,0,0.9)) drop-shadow(0 0 60px rgba(255,140,0,0.6)); }}
         .sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255,200,0,0.5), rgba(255,140,0,0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; }}
         @keyframes sunPulse {{ 0%, 100% {{ transform: scale(1) rotate(0deg); }} 50% {{ transform: scale(1.08) rotate(2deg); }} }}
         @keyframes glowPulse {{ 0%, 100% {{ opacity: 0.6; transform: scale(1); }} 50% {{ opacity: 1; transform: scale(1.1); }} }}
         
-        #moon-indicator {{ position: absolute; bottom: 25px; right: 25px; z-index: 9999; width: 100px; height: 100px; transition: opacity 0.5s ease; pointer-events: none; }}
+        #moon-indicator {{ position: absolute; bottom: 25px; right: 25px; z-index: 9999; width: 80px; height: 80px; transition: opacity 0.5s ease; pointer-events: none; }}
         .moon-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 25px 8px rgba(200,200,255,0.5); }}
         .moon-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }}
         .moon-phase-shadow {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a1a; border-radius: 50%; transition: clip-path 0.5s ease; }}
@@ -361,7 +361,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')"> ☁️ Radar + Temp</label>
             <label class="radio-label"><input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')"> 🌍 Temperature</label>
         </div>
-        <div id="time-display">Loading...</div>
+        <div id="time-display">Connecting to NOAA satellites...</div>
         <div id="left-controls">
             <button id="playBtn">▶</button>
             <div class="slider-container"><input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0"></div>
@@ -390,9 +390,10 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{{z}}/{{x}}/{{y}}{{r}}.png', {{ attribution: '© CARTO' }}).addTo(map);
         
         map.createPane('primaryPane'); map.getPane('primaryPane').style.zIndex = 410; map.getPane('primaryPane').classList.add('radar-blend');
-        let primaryLayer = L.imageOverlay('', activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
+        const BLANK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+        let primaryLayer = L.imageOverlay(BLANK_PNG, activeBounds, {{pane: 'primaryPane', opacity: 0.85, interactive: false}}).addTo(map);
         map.createPane('tempPane'); map.getPane('tempPane').style.zIndex = 420; map.getPane('tempPane').style.pointerEvents = 'none';
-        let tempOverlayLayer = L.imageOverlay('', activeBounds, {{pane: 'tempPane', opacity: 1.0, interactive: false}});
+        let tempOverlayLayer = L.imageOverlay(BLANK_PNG, activeBounds, {{pane: 'tempPane', opacity: 1.0, interactive: false}});
         const tempLabelsGroup = L.layerGroup();
         let labelMarkers = [];
         
@@ -599,32 +600,88 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 
 def render_flipbook():
     map_placeholder = st.empty()
+
+    # ── Phase 1: INSTANT MAP SHELL (renders in <100 ms) ──────────────────────
+    # Show the full map UI — tiles, controls, dolphins, planes — with an empty
+    # frame list.  The "Loading…" pill overlay inside the iframe tells the user
+    # data is on its way, but the map itself is already alive and interactive.
+    shell_html = generate_map_html([], mode="forecast", include_astronomy=False)
+    with map_placeholder:
+        components.html(shell_html, height=850, scrolling=False)
+
+    # ── Phase 2: FAST LIVE FRAME (~1–2 s) ────────────────────────────────────
+    # Fetch only today's live NEXRAD tile (single HTTP request).  Once it lands
+    # we rebuild the HTML with that one frame so the radar appears quickly.
+    live_frames = fetch_live_frame()
+    if live_frames:
+        interim_html = generate_map_html(live_frames, mode="forecast")
+        with map_placeholder:
+            components.html(interim_html, height=850, scrolling=False)
+
+    # ── Phase 3: FORECAST FRAMES in parallel (~5–15 s total) ─────────────────
+    # Kick off all HRRR tile fetches concurrently.  Collect results and do a
+    # single final swap so the flipbook has all frames sorted correctly.
+    om_data = fetch_openmeteo_data()
+    init_time = get_model_init_time()
+    now = datetime.now(timezone.utc)
+
+    urls_to_fetch = []
+    for mins_offset in MINUTES_OFFSETS:
+        frame_time = init_time + timedelta(minutes=mins_offset)
+        if frame_time > now:
+            layer_name = f"refd_{str(mins_offset).zfill(4)}"
+            url = (
+                f"https://mesonet.agron.iastate.edu/cgi-bin/wms/hrrr/refd.cgi"
+                f"?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS={layer_name}"
+                f"&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}"
+                f"&CRS=EPSG:3857&BBOX={BBOX}"
+            )
+            local_time = frame_time.astimezone(LOCAL_TZ)
+            time_str = local_time.strftime("%a, %b %d - %I:%M %p")
+            urls_to_fetch.append((frame_time, time_str, url))
+
+    accumulated = list(live_frames or [])
+
+    # --- THE FIX: Remove batch updating and use a Streamlit progress UI ---
+    # This keeps the user engaged without destroying the map iframe
+    progress_bar = st.progress(0)
+    status_text = st.empty()
     
-    # 1. INSTANT SHELL: A pure HTML/CSS spinner. No iframe destruction later.
-    map_placeholder.markdown("""
-    <div style="height: 850px; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #cce4f0; border-radius: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-        <div style="width: 50px; height: 50px; border: 5px solid #4f46e5; border-top: 5px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
-        <h2 style="color: #0f172a; margin: 0;">Initializing NOAA satellite links…</h2>
-        <p style="color: #334155; margin-top: 5px;">Fetching NOAA satellite data</p>
-    </div>
-    <style>
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # 2. FETCH DATA: Do this concurrently to make it as fast as possible
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_live = executor.submit(fetch_live_frame)
-        future_forecast = executor.submit(fetch_forecast_frames)
-        
-        live_frame = future_live.result()
-        forecast_frames = future_forecast.result()
-        
-    all_frames = (live_frame or []) + (forecast_frames or [])
-    
-    # 3. SINGLE RENDER: Replace the spinner with the map exactly ONCE.
-    if all_frames:
-        full_html = generate_map_html(all_frames, mode="forecast")
+    total_frames = len(urls_to_fetch)
+    completed_frames = 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        future_map = {
+            executor.submit(fetch_frame_data, url_info, om_data): url_info
+            for url_info in urls_to_fetch
+        }
+        for future in concurrent.futures.as_completed(future_map):
+            result = future.result()
+            if result:
+                accumulated.append(result)
+            
+            # Update the progress UI smoothly
+            # Update the progress UI smoothly
+            completed_frames += 1
+            progress_bar.progress(completed_frames / total_frames)
+            
+            # Use HTML to set a specific pixel size (e.g., 22px)
+            status_text.markdown(
+                f"<div style='font-size: 22px; font-weight: bold; margin-bottom: 10px;'>Linking to NOAA satellites...</div>", 
+                unsafe_allow_html=True
+            )
+
+    # Clean up the progress UI once fetching is done
+    progress_bar.empty()
+    status_text.empty()
+
+    # Sort all accumulated frames chronologically
+    accumulated.sort(key=lambda x: x["dt"])
+
+    # Render the map exactly ONCE. 
+    # This ensures a flawless start with zero harsh flashing or broken images.
+    if accumulated:
+        full_html = generate_map_html(accumulated, mode="forecast")
         with map_placeholder:
             components.html(full_html, height=850, scrolling=False)
     else:
