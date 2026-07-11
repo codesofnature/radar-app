@@ -348,6 +348,32 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         .dolphin-container {{ pointer-events: none; }}
         .dolphin-wrapper {{ width: 100%; height: 100%; transition: opacity 1.5s ease-in; opacity: 0; }}
         .dolphin-wrapper.loaded {{ opacity: 1; }}
+
+        /* New Dolphin Bobbing & Shadow CSS */
+        .dolphin-bobbing {{
+            width: 100%;
+            height: 100%;
+            animation: dolphinBob 2.5s ease-in-out infinite;
+        }}
+        .dolphin-shadow {{
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120%;
+            height: 25%;
+            background: radial-gradient(ellipse, rgba(0, 30, 80, 0.4), transparent 60%);
+            border-radius: 50%;
+            bottom: -15px;
+            animation: dolphinShadow 2.5s ease-in-out infinite;
+        }}
+        @keyframes dolphinBob {{
+            0%, 100% {{ transform: translateY(0); }}
+            50% {{ transform: translateY(-6px); }}
+        }}
+        @keyframes dolphinShadow {{
+            0%, 100% {{ transform: translateX(-50%) scale(1); opacity: 0.4; }}
+            50% {{ transform: translateX(-50%) scale(0.6); opacity: 0.15; }}
+        }}
         .dolphin-splash {{ position: absolute; bottom: 0px; left: 50%; transform: translateX(-50%); width: 34px; height: 12px; background: radial-gradient(ellipse at center, rgba(255,255,255,0.75), rgba(255,255,255,0) 70%); border-radius: 50%; animation: wakePulse 1.8s ease-in-out infinite; }}
         @keyframes wakePulse {{ 0%, 100% {{ opacity: 0.5; transform: translateX(-50%) scale(0.8); }} 50% {{ opacity: 0.9; transform: translateX(-50%) scale(1.2); }} }}
     </style>
@@ -557,10 +583,13 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 : `<svg viewBox="0 0 120 80" style="width:100%;height:100%;filter:drop-shadow(2px 3px 2px rgba(0,0,0,0.3));"><defs><linearGradient id="dolphinBody" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#5a9fd4;stop-opacity:1" /><stop offset="50%" style="stop-color:#4a8fc4;stop-opacity:1" /><stop offset="100%" style="stop-color:#3a7fb4;stop-opacity:1" /></linearGradient><linearGradient id="dolphinBelly" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#e8f4f8;stop-opacity:1" /><stop offset="100%" style="stop-color:#c8e4f0;stop-opacity:1" /></linearGradient></defs><path d="M 15,40 Q 8,32 5,38 Q 8,42 15,40 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><path d="M 15,40 Q 8,48 5,42 Q 8,38 15,40 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><ellipse cx="60" cy="40" rx="45" ry="18" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.5"/><ellipse cx="60" cy="48" rx="38" ry="10" fill="url(#dolphinBelly)" opacity="0.8"/><path d="M 55,22 Q 60,8 68,22 Q 62,20 55,22 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.2"/><path d="M 45,50 Q 42,62 52,58 Q 50,52 45,50 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><ellipse cx="95" cy="38" rx="18" ry="12" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.5"/><circle cx="88" cy="35" r="2.5" fill="#1a1a1a"/><circle cx="88.5" cy="34.5" r="1" fill="white"/><path d="M 95,42 Q 100,43 105,42" stroke="#2a6fa4" stroke-width="1" fill="none"/><circle cx="20" cy="50" r="3" fill="white" opacity="0.6"/><circle cx="25" cy="52" r="2" fill="white" opacity="0.5"/><circle cx="15" cy="53" r="2.5" fill="white" opacity="0.4"/></svg>`;
 
             const dolphinWrapper = `
-                <div class="dolphin-wrapper" id="dolphin-wrapper-${{idx}}">
+            <div class="dolphin-wrapper" id="dolphin-wrapper-${{idx}}">
+                <div class="dolphin-shadow"></div>
+                <div class="dolphin-bobbing">
                     <div class="dolphin-splash"></div>
                     ${{innerDolphinHtml}}
-                </div>`;
+                </div>
+            </div>`;
 
             const dolphinIcon = L.divIcon({{ className: 'dolphin-container', html: dolphinWrapper, iconSize: [20, 20], iconAnchor: [10, 10] }});
             const marker = L.marker(pos.center, {{ icon: dolphinIcon, interactive: false, zIndexOffset: 800 }}).addTo(map);
