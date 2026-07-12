@@ -553,7 +553,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             updateAstronomy(new Date(frames[index].ts || Date.now()));
         }}
         if (totalFrames === 0) {{
-            timeDisplay.innerText = "Linking to NOAA Satellites..";
+            timeDisplay.innerText = "Waiting for data...";
             if (loadingOverlay) loadingOverlay.classList.add('hidden');
         }}
         function setLayerMode(mode) {{
@@ -577,7 +577,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 playBtn.innerHTML = "▶";
                 isPlaying = false;
             }} else {{
-                nextFrame();
                 timer = setInterval(nextFrame, 450);
                 playBtn.innerHTML = "❚";
                 isPlaying = true;
@@ -697,7 +696,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 if (wrapper) {{
                     wrapper.classList.add('loaded');
                     // Enforce rotation dynamically every frame to prevent CSS override bugs
-                    //wrapper.style.transform = `rotate(${{pm.rotation}}deg)`;
+                    wrapper.style.transform = `rotate(${{pm.rotation}}deg)`;
                 }}
             }});
             requestAnimationFrame(animatePlanes);
@@ -776,7 +775,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             }}
             
             // Auto-start the loop if we have forecast frames
-            if (totalFrames >= 1) {{
+            if (typeof isLiveMode !== 'undefined' && isLiveMode === false && totalFrames > 1) {{
                 const btn = document.getElementById('playBtn');
                 if (btn && !isPlaying) {{
                     isPlaying = true;
@@ -805,7 +804,10 @@ def render_flipbook():
     # Fetch only today's live NEXRAD tile (single HTTP request).  Once it lands
     # we rebuild the HTML with that one frame so the radar appears quickly.
     live_frames = fetch_live_frame()
-    pass
+    if live_frames:
+        interim_html = generate_map_html(live_frames, mode="forecast")
+        with map_placeholder:
+            components.html(interim_html, height=850, scrolling=False)
 
     # ── Phase 3: FORECAST FRAMES in parallel (~5–15 s total) ─────────────────
     # Kick off all HRRR tile fetches concurrently.  Collect results and do a
