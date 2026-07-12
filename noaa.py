@@ -313,8 +313,8 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 20px 20px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 20px; font-size: 22px; }}
         .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
         .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
-        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: transparent; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 66vw; max-width: 90vw; }}
-        #time-display {{ font-size: 15px; font-weight: 700; color: #333333; white-space: nowrap; }}
+        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 35vw; max-width: 55vw; }}
+        #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap; }}
         #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
         #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }}
         #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
@@ -337,10 +337,23 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
         .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
         .tl.day {{ color: #000; font-weight: 900; font-size: 14px; }}
-        .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 44px; }}
-        .now-flag .now-bar {{ width: 4px; height: 100%; background: #ef4444; border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }}
-        .now-flag .now-lbl {{ font-size: 12px; font-weight: 900; color: #ef4444; margin-top: 2px; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
-        /* Tick marks row */
+        .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 70px; }}
+        /* Change the 'Now' indicator to green */
+        .now-flag .now-bar {{ 
+            width: 15px; height: 370%; background: #4ade80; 
+            border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); 
+        }}
+        .now-flag .now-lbl {{ 
+            font-size: 12px; font-weight: 900; color: #4ade80; 
+            margin-top: 2px; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); 
+        }}
+
+        /* Change the slider thumb to red */
+        input[type="range"]::-webkit-slider-thumb {{ 
+            -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; 
+            background: #ef4444; 
+            margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); 
+        }}
         #tick-canvas {{
             position: relative; width: 100%; height: 20px; pointer-events: none;
         }}
@@ -367,7 +380,8 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         
         /* UPDATED LOADING OVERLAY: Now a floating pill so the map is visible behind it immediately */
         #loading-overlay {{ position: absolute; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); border-radius: 20px; padding: 10px 24px; z-index: 10000; font-size: 16px; font-weight: bold; color: #334155; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: opacity 0.4s ease-out; pointer-events: none; }}
-        #loading-overlay.hidden {{ opacity: 0; }}
+        #loading-overlay.hidden {{ opacity: 0; pointer-events: none; visibility: hidden; }}
+
         
         .leaflet-top.leaflet-right {{ top: 15px; right: 15px; }}
         
@@ -524,11 +538,21 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             moonShadow.style.clipPath = clipPath; moonShadow.style.webkitClipPath = clipPath;
         }}
         function drawFrame(index) {{
-            if (!frames[index]) return;
-            primaryLayer.setUrl(frames[index].radarImg);
-            if (frames[index].tempImg && frames[index].tempImg.length > 50) {{ tempOverlayLayer.setUrl(frames[index].tempImg); updateLabels(frames[index].tempGrid); }}
-            timeDisplay.innerText = `${{frames[index].time}}`;
-            updateAstronomy(new Date(frames[index].ts));
+            if (!frames || !frames[index]) {{
+                console.warn('drawFrame: no frame at index', index);
+                return;
+            }}
+            primaryLayer.setUrl(frames[index].radarImg || BLANK_PNG);
+            if (frames[index].tempImg && frames[index].tempImg.length > 50) {{
+                tempOverlayLayer.setUrl(frames[index].tempImg);
+                updateLabels(frames[index].tempGrid);
+            }}
+            timeDisplay.innerText = frames[index].time || '—';
+            updateAstronomy(new Date(frames[index].ts || Date.now()));
+        }}
+        if (totalFrames === 0) {{
+            timeDisplay.innerText = "Waiting for data...";
+            if (loadingOverlay) loadingOverlay.classList.add('hidden');
         }}
         function setLayerMode(mode) {{
             currentMode = mode;
@@ -537,11 +561,24 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             else if (mode === 'temp') {{ map.addLayer(tempOverlayLayer); map.addLayer(tempLabelsGroup); }}
             drawFrame(slider.value);
         }}
-        function nextFrame() {{ let n = parseInt(slider.value) + 1; if (n > totalFrames - 1) n = 0; slider.value = n; drawFrame(n); }}
+        function nextFrame() {{
+            let n = parseInt(slider.value) + 1;
+            if (n >= totalFrames) n = 0;
+            slider.value = n;
+            drawFrame(n);
+        }}
         playBtn.onclick = () => {{
             if (isLiveMode) return;
-            if (isPlaying) {{ clearInterval(timer); playBtn.innerHTML = "▶"; isPlaying = false; }}
-            else {{ timer = setInterval(nextFrame, 450); playBtn.innerHTML = "❚"; isPlaying = true; }}
+            if (isPlaying) {{
+                clearInterval(timer);
+                timer = null;
+                playBtn.innerHTML = "▶";
+                isPlaying = false;
+            }} else {{
+                timer = setInterval(nextFrame, 450);
+                playBtn.innerHTML = "❚";
+                isPlaying = true;
+            }}
         }};
         slider.oninput = (e) => {{ if (isLiveMode) return; if (isPlaying) playBtn.click(); drawFrame(e.target.value); }};
         if (isLiveMode) {{ playBtn.innerHTML = ""; playBtn.disabled = true; slider.disabled = true; }}
@@ -558,7 +595,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             const nowPct = Math.max(0, Math.min(100, ((nowTs - firstTs) / spanMs) * 100));
 
             // Minor tick every 15 min, major every 60 min
-            const minorMs = 15 * 60 * 1000;
+            const minorMs = 120 * 60 * 1000;
             let t = Math.ceil(firstTs / minorMs) * minorMs;
             while (t <= lastTs) {{
                 const pct = ((t - firstTs) / spanMs) * 100;
@@ -589,14 +626,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 }}
                 t += minorMs;
             }}
-
-            // Green "Now" callout
-            // Red "Now" vertical bar callout
-            const flag = document.createElement('div');
-            flag.className = 'now-flag';
-            flag.style.left = nowPct + '%';
-            flag.innerHTML = '<div class="now-bar"></div><div class="now-lbl">Now</div>';
-            tickRow.appendChild(flag);
         }})();
 
         drawFrame(0);
@@ -737,12 +766,19 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         // Run immediately without waiting for the unreliable 'load' event
         setTimeout(() => {{
             const overlay = document.getElementById('loading-overlay');
-            if (overlay) overlay.classList.add('hidden');
+            if (overlay) {{
+                overlay.classList.add('hidden');
+                setTimeout(() => {{ if(overlay) overlay.remove(); }}, 500);
+            }}
             
             // Auto-start the loop if we have forecast frames
-            if (typeof isLiveMode !== 'undefined' && !isLiveMode && totalFrames > 1) {{
+            if (typeof isLiveMode !== 'undefined' && !isLiveMode && totalFrames >= 1) {{
                 const btn = document.getElementById('playBtn');
-                if (btn && !isPlaying) btn.click();
+                if (btn && !isPlaying) {{
+                    isPlaying = true;
+                    playBtn.innerHTML = "❚";
+                    timer = setInterval(nextFrame, 450);
+                }}
             }}
         }}, 800);
     </script>
