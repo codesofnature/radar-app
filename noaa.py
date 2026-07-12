@@ -305,20 +305,20 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         .radar-blend {{ mix-blend-mode: multiply; }}
         .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
         .temp-label {{ font-family: -apple-system, sans-serif; font-size: 20px; font-weight: 200; text-align: center; pointer-events: none; margin-top: -8px; text-shadow: 0px 1px 2px rgba(0,0,0,0.8); }}
-        #layer-selector {{ position: absolute; left: 25px; bottom: 25px; z-index: 9999; background: rgba(255,255,255,0.15); backdrop-filter: blur(8px); padding: 12px 18px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 12px; font-size: 15px; font-weight: 700; color: #0f172a; }}
+        #layer-selector {{ position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(20,20,40,0.55); backdrop-filter: blur(12px); padding: 8px 18px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.25); display: flex; flex-direction: row; gap: 18px; font-size: 20px; color: #e2e8f0; }}
         .radio-label {{ display: flex; align-items: center; gap: 8px; cursor: pointer; }}
         .radio-label input[type="radio"] {{ accent-color: #4f46e5; cursor: pointer; width: 32px; height: 32px; }}
-        #time-display {{ position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 9999; background: linear-gradient(135deg, rgba(255,255,255,0.55), rgba(255,255,255,0.15)); backdrop-filter: blur(16px); border-top: 2px solid rgba(255,255,255,0.9); border-left: 2px solid rgba(255,255,255,0.6); border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2); box-shadow: 0 15px 35px rgba(0,0,0,0.25); padding: 10px 24px; border-radius: 16px; font-size: 22px; font-weight: 800; color: #0f172a; white-space: nowrap; letter-spacing: -0.5px; overflow: hidden; }}
-        #time-display::after {{ content: " "; position: absolute; top: 0; left: -100%; width: 50%; height: 100%; background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.5), rgba(255,255,255,0)); transform: skewX(-25deg); animation: glassGlare 6s infinite; pointer-events: none; }}
-        @keyframes glassGlare {{ 0% {{ left: -100%; }} 15% {{ left: 200%; }} 100% {{ left: 200%; }} }}
-        #left-controls {{ position: absolute; left: 15px; top: 50%; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.15); backdrop-filter: blur(8px); padding: 15px 12px; border-radius: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: center; gap: 25px; }}
-        #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }}
+        #bottom-bar {{ position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(20,20,40,0.55); backdrop-filter: blur(12px); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 60vw; }}
+        #time-display {{ font-size: 15px; font-weight: 700; color: #e2e8f0; white-space: nowrap; letter-spacing: 0.3px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }}
+        #slider-row {{ display: flex; align-items: center; gap: 12px; width: 100%; }}
+        #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }}
         #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
         #playBtn:disabled {{ background: #94a3b8; cursor: wait; }}
-        .slider-container {{ position: relative; width: 20px; height: 250px; }}
-        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; position: absolute; width: 250px; height: 20px; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-90deg); }}
-        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #4f46e5; margin-top: -6px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); border: 2px solid #fff; }}
-        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: #cbd5e1; border-radius: 2px; }}
+        .sun-icon-small {{ font-size: 22px; flex-shrink: 0; filter: drop-shadow(0 0 5px rgba(255,200,0,0.8)); }}
+        .moon-icon-small {{ font-size: 20px; flex-shrink: 0; filter: drop-shadow(0 0 5px rgba(180,180,255,0.7)); }}
+        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; flex: 1; height: 20px; }}
+        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: white; margin-top: -7px; box-shadow: 0 1px 6px rgba(0,0,0,0.5); border: 2px solid #4f46e5; }}
+        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; }}
         
         /* UPDATED LOADING OVERLAY: Now a floating pill so the map is visible behind it immediately */
         #loading-overlay {{ position: absolute; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); border-radius: 20px; padding: 10px 24px; z-index: 10000; font-size: 16px; font-weight: bold; color: #334155; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: opacity 0.4s ease-out; pointer-events: none; }}
@@ -387,10 +387,14 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')">🌡️💧</label>
             <label class="radio-label"><input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')">🗺️</label>
         </div>
-        <div id="time-display">Connecting to NOAA satellites...</div>
-        <div id="left-controls">
-            <button id="playBtn">▶</button>
-            <div class="slider-container"><input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0"></div>
+        <div id="bottom-bar">
+            <div id="time-display">Connecting to NOAA satellites...</div>
+            <div id="slider-row">
+                <span class="sun-icon-small">☀️</span>
+                <button id="playBtn">▶</button>
+                <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
+                <span class="moon-icon-small">🌙</span>
+            </div>
         </div>
         {sun_html}
         {moon_html}
