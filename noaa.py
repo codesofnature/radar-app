@@ -255,8 +255,13 @@ def fetch_forecast_frames():
 
 def generate_map_html(radar_frames, mode="live", include_astronomy=True):
     is_forecast = (mode == "forecast")
+    
+    # Calculate absolute start/end timestamps for the tick marks
+    init_time = get_model_init_time()
+    first_ts_val = int(init_time.timestamp() * 1000)
+    last_ts_val = int((init_time + timedelta(minutes=48*60)).timestamp() * 1000)
+
     # include_astronomy=False skips the NASA sun/moon network fetches entirely so the
-    # very first "instant shell" render never makes a blocking HTTP call before painting.
     if include_astronomy:
         sun_img_data = get_embedded_sun_image()
         moon_img_data = get_embedded_moon_image()
@@ -305,20 +310,60 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         .radar-blend {{ mix-blend-mode: multiply; }}
         .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
         .temp-label {{ font-family: -apple-system, sans-serif; font-size: 20px; font-weight: 200; text-align: center; pointer-events: none; margin-top: -8px; text-shadow: 0px 1px 2px rgba(0,0,0,0.8); }}
-        #layer-selector {{ position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(20,20,40,0.55); backdrop-filter: blur(12px); padding: 8px 18px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.25); display: flex; flex-direction: row; gap: 18px; font-size: 20px; color: #e2e8f0; }}
-        .radio-label {{ display: flex; align-items: center; gap: 8px; cursor: pointer; }}
-        .radio-label input[type="radio"] {{ accent-color: #4f46e5; cursor: pointer; width: 32px; height: 32px; }}
-        #bottom-bar {{ position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(20,20,40,0.55); backdrop-filter: blur(12px); padding: 10px 20px; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 60vw; }}
-        #time-display {{ font-size: 15px; font-weight: 700; color: #e2e8f0; white-space: nowrap; letter-spacing: 0.3px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }}
-        #slider-row {{ display: flex; align-items: center; gap: 12px; width: 100%; }}
-        #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }}
+        #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 20px 20px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 20px; font-size: 22px; }}
+        .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
+        .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
+        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: transparent; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 66vw; max-width: 90vw; }}
+        #time-display {{ font-size: 15px; font-weight: 700; color: #333333; white-space: nowrap; }}
+        #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
+        #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }}
         #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
-        #playBtn:disabled {{ background: #94a3b8; cursor: wait; }}
-        .sun-icon-small {{ font-size: 22px; flex-shrink: 0; filter: drop-shadow(0 0 5px rgba(255,200,0,0.8)); }}
-        .moon-icon-small {{ font-size: 20px; flex-shrink: 0; filter: drop-shadow(0 0 5px rgba(180,180,255,0.7)); }}
-        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; flex: 1; height: 20px; }}
-        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%; background: white; margin-top: -7px; box-shadow: 0 1px 6px rgba(0,0,0,0.5); border: 2px solid #4f46e5; }}
-        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 4px; background: rgba(255,255,255,0.3); border-radius: 2px; }}
+        #playBtn:disabled {{ background: #475569; cursor: wait; }}
+        #bar-sun {{ width: 48px; height: 48px; flex-shrink: 0; position: relative; }}
+        #bar-sun .sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255,200,0,0.5), rgba(255,140,0,0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; }}
+        #bar-sun .sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
+        #bar-sun .sun-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; transform: scale(1.4); filter: drop-shadow(0 0 10px rgba(255,200,0,0.9)); }}
+        #bar-moon {{ width: 44px; height: 44px; flex-shrink: 0; position: relative; }}
+        #bar-moon .moon-glow {{ position: absolute; top: -20%; left: -20%; width: 140%; height: 140%; border-radius: 50%; background: radial-gradient(circle, rgba(200,200,255,0.4), transparent 60%); animation: moonGlow 5s ease-in-out infinite; }}
+        #bar-moon .moon-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 14px 4px rgba(200,200,255,0.35); }}
+        #bar-moon .moon-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }}
+        #bar-moon .moon-phase-shadow {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a1a; border-radius: 50%; transition: clip-path 0.5s ease; }}
+        .slider-col {{ flex: 1; display: flex; flex-direction: column; gap: 0; }}
+        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 22px; display: block; }}
+        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 2px; }}
+        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; background: #4ade80; margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
+        #tick-row {{ position: relative; width: 100%; height: 28px; pointer-events: none; }}
+        .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
+        .tk.maj {{ background: rgba(0,0,0,0.45); }}
+        .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
+        .tl.day {{ color: #000; font-weight: 900; font-size: 14px; }}
+        .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 44px; }}
+        .now-flag .now-bar {{ width: 4px; height: 100%; background: #ef4444; border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); }}
+        .now-flag .now-lbl {{ font-size: 12px; font-weight: 900; color: #ef4444; margin-top: 2px; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
+        /* Tick marks row */
+        #tick-canvas {{
+            position: relative; width: 100%; height: 20px; pointer-events: none;
+        }}
+        .tick-mark {{
+            position: absolute; top: 0;
+            width: 1px; background: rgba(255,255,255,0.35); height: 6px;
+            transform: translateX(-50%);
+        }}
+        .tick-mark.major {{
+            height: 9px; background: rgba(255,255,255,0.6); width: 1px;
+        }}
+        .tick-label {{
+            position: absolute; top: 8px;
+            font-size: 10px; color: rgba(255,255,255,0.55); font-weight: 500;
+            transform: translateX(-50%); white-space: nowrap;
+        }}
+        .tick-label.now-tick {{
+            color: #fff; font-weight: 800; font-size: 11px;
+        }}
+        .now-pointer {{
+            position: absolute; top: -18px; font-size: 9px; color: #fff;
+            transform: translateX(-50%); line-height: 1;
+        }}
         
         /* UPDATED LOADING OVERLAY: Now a floating pill so the map is visible behind it immediately */
         #loading-overlay {{ position: absolute; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); border-radius: 20px; padding: 10px 24px; z-index: 10000; font-size: 16px; font-weight: bold; color: #334155; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: opacity 0.4s ease-out; pointer-events: none; }}
@@ -341,13 +386,11 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         @keyframes moonGlow {{ 0%, 100% {{ opacity: 0.7; }} 50% {{ opacity: 1; }} }}
         
         .plane-icon-container {{ pointer-events: none; }}
-        .plane-wrapper {{ width: 100%; height: 100%; transition: opacity 1.5s ease-in; opacity: 0; }}
-        .plane-wrapper.loaded {{ opacity: 1; }}
+        .plane-wrapper {{ width: 100%; height: 100%; position: relative; }}
         .plane-shadow {{ position: absolute; left: 50%; transform: translateX(-50%); width: 140%; height: 20%; background: radial-gradient(ellipse, rgba(0,0,0,0.55), rgba(0,0,0,0.2) 40%, transparent 70%); border-radius: 50%; bottom: -28px; opacity: 0.22; }}
         
         .dolphin-container {{ pointer-events: none; }}
-        .dolphin-wrapper {{ width: 100%; height: 100%; transition: opacity 1.5s ease-in; opacity: 0; }}
-        .dolphin-wrapper.loaded {{ opacity: 1; }}
+        .dolphin-wrapper {{ width: 100%; height: 100%; position: relative; }}
 
         /* New Dolphin Bobbing & Shadow CSS */
         .dolphin-bobbing {{
@@ -388,21 +431,35 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             <label class="radio-label"><input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')">🗺️</label>
         </div>
         <div id="bottom-bar">
-            <div id="time-display">Connecting to NOAA satellites...</div>
+            <div id="time-display">Connecting to NOAA satellites…</div>
             <div id="slider-row">
-                <span class="sun-icon-small">☀️</span>
+                <div id="bar-sun">
+                    <div class="sun-glow"></div>
+                    <div class="sun-image-container">
+                        <img class="sun-image" src="{sun_img_data}" alt="" onerror="this.style.display='none'">
+                    </div>
+                </div>
                 <button id="playBtn">▶</button>
-                <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
-                <span class="moon-icon-small">🌙</span>
+                <div class="slider-col">
+                    <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
+                    <div id="tick-row"></div>
+                </div>
+                <div id="bar-moon">
+                    <div class="moon-glow"></div>
+                    <div class="moon-image-container">
+                        <img class="moon-image" src="{moon_img_data}" alt="" onerror="this.style.display='none'">
+                        <div class="moon-phase-shadow" id="moonShadow"></div>
+                    </div>
+                </div>
             </div>
         </div>
-        {sun_html}
-        {moon_html}
     </div>
     <script>
         const frames = [{js_frames_array}];
         const totalFrames = frames.length;
         const isLiveMode = {str(not is_forecast).lower()};
+        const firstTs = {first_ts_val};
+        const lastTs = {last_ts_val};
         let currentMode = 'pure_radar';
         const activeBounds = {MAP_BOUNDS};
         const viewBounds = [[24.0, -125.0], [50.0, -66.0]];
@@ -427,7 +484,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         const tempLabelsGroup = L.layerGroup();
         let labelMarkers = [];
         
-        const slider = document.getElementById('slider'), timeDisplay = document.getElementById('time-display'), playBtn = document.getElementById('playBtn'), loadingOverlay = document.getElementById('loading-overlay'), sunIndicator = document.getElementById('sun-indicator'), moonIndicator = document.getElementById('moon-indicator'), moonShadow = document.getElementById('moonShadow');
+        const slider = document.getElementById('slider'), timeDisplay = document.getElementById('time-display'), playBtn = document.getElementById('playBtn'), loadingOverlay = document.getElementById('loading-overlay'), sunIndicator = document.getElementById('sun-indicator'), moonIndicator = document.getElementById('moon-indicator'), moonShadow = document.getElementById('moonShadow'), tickRow = document.getElementById('tick-row');
         let timer = null, isPlaying = false;
         
         function tempToColor(fahrenheit) {{
@@ -488,6 +545,60 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         }};
         slider.oninput = (e) => {{ if (isLiveMode) return; if (isPlaying) playBtn.click(); drawFrame(e.target.value); }};
         if (isLiveMode) {{ playBtn.innerHTML = ""; playBtn.disabled = true; slider.disabled = true; }}
+
+        // Build tick labels like the Apple weather slider: 6am · 12pm · Now · 6pm + day names
+        // Build Apple-Weather-style tick row
+        // Build Apple-Weather-style tick row
+        (function buildTicks() {{
+            if (!tickRow) return;
+            const spanMs = lastTs - firstTs;
+            if (spanMs <= 0) return;
+
+            const nowTs = Date.now();
+            const nowPct = Math.max(0, Math.min(100, ((nowTs - firstTs) / spanMs) * 100));
+
+            // Minor tick every 15 min, major every 60 min
+            const minorMs = 15 * 60 * 1000;
+            let t = Math.ceil(firstTs / minorMs) * minorMs;
+            while (t <= lastTs) {{
+                const pct = ((t - firstTs) / spanMs) * 100;
+                const d = new Date(t);
+                const h = d.getHours(), m = d.getMinutes();
+                const isMajor = m === 0;
+                const isLabel = m === 0 && h % 6 === 0;
+                const isDay = m === 0 && h === 0;
+
+                // tick line
+                const tk = document.createElement('div');
+                tk.className = 'tk' + (isMajor ? ' maj' : '');
+                tk.style.left = pct + '%';
+                tk.style.height = isMajor ? '8px' : '5px';
+                tickRow.appendChild(tk);
+
+                // label at 6-hour marks
+                if (isLabel) {{
+                    const tl = document.createElement('div');
+                    tl.className = 'tl' + (isDay ? ' day' : '');
+                    tl.style.left = pct + '%';
+                    if (isDay) {{
+                        tl.textContent = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+                    }} else {{
+                        tl.textContent = h === 12 ? '12pm' : (h < 12 ? h + 'am' : (h-12) + 'pm');
+                    }}
+                    tickRow.appendChild(tl);
+                }}
+                t += minorMs;
+            }}
+
+            // Green "Now" callout
+            // Red "Now" vertical bar callout
+            const flag = document.createElement('div');
+            flag.className = 'now-flag';
+            flag.style.left = nowPct + '%';
+            flag.innerHTML = '<div class="now-bar"></div><div class="now-lbl">Now</div>';
+            tickRow.appendChild(flag);
+        }})();
+
         drawFrame(0);
 
         // --- A380 PLANES (Real-world routes) ---
@@ -503,7 +614,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             // Web Mercator maps compress longitude at higher latitudes.
             // We must scale the longitude difference by cos(midpoint_latitude) 
             // so the plane points exactly along its visual flight path.
-            <!-- In generate_map_html, the plane angle calculation section: -->
+            //<!-- In generate_map_html, the plane angle calculation section: -->
             const dLat = route.end[0] - route.start[0];
             const dLon = route.end[1] - route.start[1];
             const midLatRad = ((route.start[0] + route.end[0]) / 2) * (Math.PI / 180);
@@ -622,10 +733,18 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         }}
         setTimeout(animateDolphins, 1500);
 
-        map.whenReady(() => {{
-            setTimeout(() => {{ loadingOverlay.classList.add('hidden'); }}, 600);
-            if (!isLiveMode && totalFrames > 1) setTimeout(() => {{ playBtn.click(); }}, 450);
-        }});
+        // Run immediately without waiting for the unreliable 'load' event
+        // Run immediately without waiting for the unreliable 'load' event
+        setTimeout(() => {{
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            
+            // Auto-start the loop if we have forecast frames
+            if (typeof isLiveMode !== 'undefined' && !isLiveMode && totalFrames > 1) {{
+                const btn = document.getElementById('playBtn');
+                if (btn && !isPlaying) btn.click();
+            }}
+        }}, 800);
     </script>
 </body>
 </html>
