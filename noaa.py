@@ -339,9 +339,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         .tl.day {{ color: #000; font-weight: 900; font-size: 14px; }}
         .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 70px; }}
         /* Change the 'Now' indicator to green */
-        .now-flag .now-bar {{ 
-            width: 15px; height: 370%; background: #4ade80; 
-            border-radius: 2px; box-shadow: 0 1px 4px rgba(0,0,0,0.4); 
+        .now-flag .now-bar {{
+            width: 20px;
+            height: 500%;
+            background: #4ade80;
+            border-radius: 2px;
+            box-shadow: 0 1px 4px rgba(0,0,0,.4);
         }}
         .now-flag .now-lbl {{ 
             font-size: 12px; font-weight: 900; color: #4ade80; 
@@ -436,7 +439,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
     </style>
 </head>
 <body class="{'forecast-mode' if is_forecast else 'live-mode'}">
-    <div id="loading-overlay">Initializing Layers…</div>
     <div id="map-container">
         <div id="map"></div>
         <div id="layer-selector">
@@ -551,7 +553,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             updateAstronomy(new Date(frames[index].ts || Date.now()));
         }}
         if (totalFrames === 0) {{
-            timeDisplay.innerText = "Waiting for data...";
+            timeDisplay.innerText = "Linking to NOAA Satellites..";
             if (loadingOverlay) loadingOverlay.classList.add('hidden');
         }}
         function setLayerMode(mode) {{
@@ -575,6 +577,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 playBtn.innerHTML = "▶";
                 isPlaying = false;
             }} else {{
+                nextFrame();
                 timer = setInterval(nextFrame, 450);
                 playBtn.innerHTML = "❚";
                 isPlaying = true;
@@ -595,7 +598,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             const nowPct = Math.max(0, Math.min(100, ((nowTs - firstTs) / spanMs) * 100));
 
             // Minor tick every 15 min, major every 60 min
-            const minorMs = 120 * 60 * 1000;
+            const minorMs = 240 * 60 * 1000;
             let t = Math.ceil(firstTs / minorMs) * minorMs;
             while (t <= lastTs) {{
                 const pct = ((t - firstTs) / spanMs) * 100;
@@ -694,7 +697,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 if (wrapper) {{
                     wrapper.classList.add('loaded');
                     // Enforce rotation dynamically every frame to prevent CSS override bugs
-                    wrapper.style.transform = `rotate(${{pm.rotation}}deg)`;
+                    //wrapper.style.transform = `rotate(${{pm.rotation}}deg)`;
                 }}
             }});
             requestAnimationFrame(animatePlanes);
@@ -737,7 +740,8 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 
             const dolphinIcon = L.divIcon({{ className: 'dolphin-container', html: dolphinWrapper, iconSize: [20, 20], iconAnchor: [10, 10] }});
             const marker = L.marker(pos.center, {{ icon: dolphinIcon, interactive: false, zIndexOffset: 800 }}).addTo(map);
-            dolphinMarkers.push({{ marker, pos, startTime: Date.now() + (idx * 2000) }});
+            // Subtract the offset so they start mid-cycle, preventing negative elapsed time
+            dolphinMarkers.push({{ marker, pos, startTime: Date.now() - (idx * 15000) }});
         }});
 
         function animateDolphins() {{
@@ -754,7 +758,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 dm.marker.setLatLng([lat, lon]);
                 const wrapper = document.getElementById(`dolphin-wrapper-${{dolphinMarkers.indexOf(dm)}}`);
                 if (wrapper) {{
-                    //wrapper.style.transform = `rotate(${{headingDeg}}deg)`;
                     wrapper.classList.add('loaded');
                 }}
             }});
@@ -764,19 +767,20 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 
         // Run immediately without waiting for the unreliable 'load' event
         // Run immediately without waiting for the unreliable 'load' event
+        // Run immediately without waiting for the unreliable 'load' event
         setTimeout(() => {{
             const overlay = document.getElementById('loading-overlay');
             if (overlay) {{
-                overlay.classList.add('hidden');
+                overlay.style.opacity = '0';
                 setTimeout(() => {{ if(overlay) overlay.remove(); }}, 500);
             }}
             
             // Auto-start the loop if we have forecast frames
-            if (typeof isLiveMode !== 'undefined' && !isLiveMode && totalFrames >= 1) {{
+            if (totalFrames >= 1) {{
                 const btn = document.getElementById('playBtn');
                 if (btn && !isPlaying) {{
                     isPlaying = true;
-                    playBtn.innerHTML = "❚";
+                    btn.innerHTML = "❚";
                     timer = setInterval(nextFrame, 450);
                 }}
             }}
@@ -801,10 +805,7 @@ def render_flipbook():
     # Fetch only today's live NEXRAD tile (single HTTP request).  Once it lands
     # we rebuild the HTML with that one frame so the radar appears quickly.
     live_frames = fetch_live_frame()
-    if live_frames:
-        interim_html = generate_map_html(live_frames, mode="forecast")
-        with map_placeholder:
-            components.html(interim_html, height=850, scrolling=False)
+    pass
 
     # ── Phase 3: FORECAST FRAMES in parallel (~5–15 s total) ─────────────────
     # Kick off all HRRR tile fetches concurrently.  Collect results and do a
