@@ -253,7 +253,7 @@ def fetch_forecast_frames():
         init_time = init_time - timedelta(hours=1)
     return frames_data
 
-def generate_map_html(radar_frames, mode="live", include_astronomy=True):
+def generate_map_html(radar_frames, mode="live", include_astronomy=True, include_decorations=True):
     is_forecast = (mode == "forecast")
     
     # Calculate absolute start/end timestamps for the tick marks
@@ -313,7 +313,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 20px 20px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 20px; font-size: 22px; }}
         .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
         .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
-        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 35vw; max-width: 55vw; }}
+        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 35vw; max-width: 55vw; }}
         #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap; }}
         #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
         #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }}
@@ -332,7 +332,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 22px; display: block; }}
         input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 2px; }}
         input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; background: #4ade80; margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
-        #tick-row {{ position: relative; width: 100%; height: 28px; pointer-events: none; }}
+        #tick-row {{ position: relative; width: 100%; height: 28px; pointer-events: none; margin-top: -12px;}}
         .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
         .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
@@ -441,6 +441,10 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
 <body class="{'forecast-mode' if is_forecast else 'live-mode'}">
     <div id="map-container">
         <div id="map"></div>
+        
+        {sun_html}
+        {moon_html}
+        <div id="loading-overlay">Loading...</div>
         <div id="layer-selector">
             <label class="radio-label"><input type="radio" name="layerMode" value="pure_radar" checked onchange="setLayerMode('pure_radar')">🌤️</label>
             <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')">🌡️💧</label>
@@ -449,23 +453,10 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
         <div id="bottom-bar">
             <div id="time-display">Connecting to NOAA satellites…</div>
             <div id="slider-row">
-                <div id="bar-sun">
-                    <div class="sun-glow"></div>
-                    <div class="sun-image-container">
-                        <img class="sun-image" src="{sun_img_data}" alt="" onerror="this.style.display='none'">
-                    </div>
-                </div>
                 <button id="playBtn">▶</button>
                 <div class="slider-col">
                     <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
                     <div id="tick-row"></div>
-                </div>
-                <div id="bar-moon">
-                    <div class="moon-glow"></div>
-                    <div class="moon-image-container">
-                        <img class="moon-image" src="{moon_img_data}" alt="" onerror="this.style.display='none'">
-                        <div class="moon-phase-shadow" id="moonShadow"></div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -695,8 +686,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
                 const wrapper = document.getElementById(`plane-wrapper-${{planeMarkers.indexOf(pm)}}`);
                 if (wrapper) {{
                     wrapper.classList.add('loaded');
-                    // Enforce rotation dynamically every frame to prevent CSS override bugs
-                    wrapper.style.transform = `rotate(${{pm.rotation}}deg)`;
                 }}
             }});
             requestAnimationFrame(animatePlanes);
@@ -775,12 +764,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True):
             }}
             
             // Auto-start the loop if we have forecast frames
+            // Auto-start the loop if we have forecast frames
+            // Auto-start the loop if we have forecast frames
             if (typeof isLiveMode !== 'undefined' && isLiveMode === false && totalFrames > 1) {{
                 const btn = document.getElementById('playBtn');
                 if (btn && !isPlaying) {{
-                    isPlaying = true;
-                    btn.innerHTML = "❚";
-                    timer = setInterval(nextFrame, 450);
+                    btn.click();
                 }}
             }}
         }}, 800);
@@ -796,7 +785,7 @@ def render_flipbook():
     # Show the full map UI — tiles, controls, dolphins, planes — with an empty
     # frame list.  The "Loading…" pill overlay inside the iframe tells the user
     # data is on its way, but the map itself is already alive and interactive.
-    shell_html = generate_map_html([], mode="forecast", include_astronomy=False)
+    shell_html = generate_map_html([], mode="forecast", include_astronomy=False, include_decorations=False)
     with map_placeholder:
         components.html(shell_html, height=850, scrolling=False)
 
@@ -805,7 +794,7 @@ def render_flipbook():
     # we rebuild the HTML with that one frame so the radar appears quickly.
     live_frames = fetch_live_frame()
     if live_frames:
-        interim_html = generate_map_html(live_frames, mode="forecast")
+        interim_html = generate_map_html(live_frames, mode="forecast", include_decorations=False)
         with map_placeholder:
             components.html(interim_html, height=850, scrolling=False)
 
