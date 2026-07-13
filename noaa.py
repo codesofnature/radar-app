@@ -361,11 +361,11 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 70px; display: block; }}
         input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 6px; }}
         input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 60px; width: 12px; border-radius: 6px; background: #ef4444; margin-top: -26px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
-        #tick-row {{ position: relative; width: 100%; height: 40px; pointer-events: none; margin-top: -18px;}}
+        #tick-row {{ position: relative; width: 100%; height: 40px; pointer-events: none; margin-top: -36px;}}
         .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
         .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
-        .tl.day {{ color: #000; font-weight: 900; font-size: 14px; }}
+        .tl.day {{ color: #000; font-weight: 900; font-size: 18px; }}
         .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 70px; }}
         /* Change the 'Now' indicator to green */
         .now-flag .now-bar {{
@@ -412,7 +412,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         
         .leaflet-top.leaflet-right {{ top: 15px; right: 15px; }}
         
-        #sun-indicator {{ position: absolute; top: 25px; left: 25px; z-index: 9999; width: 80px; height: 80px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
+        #sun-indicator {{ position: absolute; bottom: 25px; left: 25px; z-index: 9999; width: 80px; height: 80px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
         .sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
         .sun-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; transform: scale(1.4); filter: drop-shadow(0 0 30px rgba(255,200,0,0.9)) drop-shadow(0 0 60px rgba(255,140,0,0.6)); }}
         .sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255,200,0,0.5), rgba(255,140,0,0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; }}
@@ -472,7 +472,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                 font-size: 11px;
             }}
             .tl.day {{
-                font-size: 12px;
+                font-size: 18px;
             }}
             
             /* Optional: Make the time text a bit smaller to fit */
