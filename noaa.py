@@ -259,7 +259,9 @@ import json # Make sure this is imported at the top
 def fetch_opensky_planes():
     # US Bounding Box: lamin=24.0, lomin=-125.0, lamax=50.0, lomax=-66.0
     url = "https://opensky-network.org/api/states/all?lamin=24.0&lomin=-125.0&lamax=50.0&lomax=-66.0"
-    
+    headers = { # Add this
+        "User-Agent": "InstantRadar/1.0 (streamlit.app)"
+    }
     try:
         resp = requests.get(url, timeout=10)
         
