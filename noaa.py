@@ -358,9 +358,9 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         #bar-moon .moon-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }}
         #bar-moon .moon-phase-shadow {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a1a; border-radius: 50%; transition: clip-path 0.5s ease; }}
         .slider-col {{ flex: 1; display: flex; flex-direction: column; gap: 0; }}
-        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 22px; display: block; }}
-        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 2px; }}
-        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; background: #4ade80; margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
+        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 70px; display: block; }}
+        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 6px; }}
+        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 60px; width: 12px; border-radius: 6px; background: #ef4444; margin-top: -26px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
         #tick-row {{ position: relative; width: 100%; height: 40px; pointer-events: none; margin-top: -18px;}}
         .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
@@ -380,16 +380,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
             margin-top: 2px; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); 
         }}
 
-        /* Change the slider thumb to red */
-        input[type="range"]::-webkit-slider-thumb {{ 
-            -webkit-appearance: none; 
-            height: 32px; 
-            width: 6px; 
-            border-radius: 3px; 
-            background: #ef4444; /* Back to solid red */
-            margin-top: -14px; 
-            box-shadow: 0 0 4px rgba(0,0,0,0.3);
-        }}
+        
         #tick-canvas {{
             position: relative; width: 100%; height: 20px; pointer-events: none;
         }}
@@ -522,7 +513,15 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         const lastTs = {last_ts_val};
         let currentMode = 'pure_radar';
         const activeBounds = {MAP_BOUNDS};
-        const viewBounds = [[24.0, -125.0], [50.0, -66.0]];
+        // 1. Define both sets of coordinates
+        const desktopBounds = [[24.0, -125.0], [50.0, -66.0]]; // Normal full US view
+        const phoneBounds = [[33.69, -87.63], [41.88, -78.89]]; // Chicago to Myrtle Beach
+
+        // 2. Check the screen width (768px is the standard cutoff for phones)
+        const isPhone = window.innerWidth <= 768;
+
+        // 3. Choose which bounds to use based on the device
+        const viewBounds = isPhone ? phoneBounds : desktopBounds;
         const erieLat = 42.1292, erieLon = -80.0851;
         
         // Pass Python base64 strings to JS
