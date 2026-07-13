@@ -276,7 +276,7 @@ def fetch_opensky_planes():
                         "lon": s[5], "lat": s[6],
                         "altitude": s[7], "velocity": s[9], "heading": s[10]
                     })
-            return planes[:30] # Cap at 30 for mobile perf
+            return planes[:150] # Cap at 30 for mobile perf
 
         elif resp.status_code == 429:
             logger.warning("OpenSky rate limited - too many requests")
@@ -730,7 +730,16 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
             planeMarkers.forEach(pm => map.removeLayer(pm.marker));
             planeMarkers = [];
 
-            const shuffled = [...allPlanesCache].sort(() => 0.5 - Math.random());
+            // --- THE FIX: Filter planes by the current viewable map bounds ---
+            const currentBounds = map.getBounds();
+            const visiblePlanes = allPlanesCache.filter(plane => {{
+                return currentBounds.contains([plane.lat, plane.lon]);
+            }});
+
+            // If there are planes on screen, pool from those. If not, fallback to the main list.
+            const pool = visiblePlanes.length > 0 ? visiblePlanes : allPlanesCache;
+
+            const shuffled = [...pool].sort(() => 0.5 - Math.random());
             const selected = shuffled.slice(0, 5);
 
             selected.forEach((plane, idx) => {{
@@ -758,8 +767,6 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
                 planeMarkers.push({{ marker, plane, startTime: Date.now() }});
             }});
-
-
         }}
 
         // Run immediately, then swap every 30 seconds
