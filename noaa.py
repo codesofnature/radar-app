@@ -257,35 +257,37 @@ import json # Make sure this is imported at the top
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_opensky_planes():
-    # US Bounding Box: lamin=24.0, lomin=-125.0, lamax=50.0, lomax=-66.0
     url = "https://opensky-network.org/api/states/all?lamin=24.0&lomin=-125.0&lamax=50.0&lomax=-66.0"
-    headers = { # Add this
-        "User-Agent": "InstantRadar/1.0 (streamlit.app)"
+
+    headers = {
+        "User-Agent": "InstantRadar/1.0 (contact: yourname@email.com)" # Add real contact
     }
+
     try:
-        resp = requests.get(url, headers=headers, timeout=10) # add headers=
+        resp = requests.get(url, headers=headers, timeout=10)
 
         if resp.status_code == 200:
             states = resp.json().get('states', [])
-            all_planes = []
+            planes = []
             for s in states:
                 if s[5] and s[6] and s[7] is not None and s[9] and s[10]:
-                    all_planes.append({
+                    planes.append({
                         "callsign": s[1].strip() if s[1] else "UNKNOWN",
-                        "lon": s[5],
-                        "lat": s[6],
-                        "altitude": s[7],
-                        "velocity": s[9],
-                        "heading": s[10]
+                        "lon": s[5], "lat": s[6],
+                        "altitude": s[7], "velocity": s[9], "heading": s[10]
                     })
-            return all_planes[:50] # Optional: cap at 50 so mobile doesn't choke
+            return planes[:30] # Cap at 30 for mobile perf
 
-        elif resp.status_code == 429: # Rate limited
-            logger.warning("OpenSky rate limited")
+        elif resp.status_code == 429:
+            logger.warning("OpenSky rate limited - too many requests")
+            return []
+        else:
+            logger.warning(f"OpenSky returned {resp.status_code}")
             return []
 
     except Exception as e:
-        logger.error(f"OpenSky API error: {e}")
+        logger.error(f"OpenSky error: {e}")
+        return []
 
     return [] # Return empty instead of fake planes
 def generate_map_html(radar_frames, mode="live", include_astronomy=True, include_decorations=True):
