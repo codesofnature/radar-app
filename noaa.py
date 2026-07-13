@@ -468,6 +468,26 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         }}
         .dolphin-splash {{ position: absolute; bottom: 0px; left: 50%; transform: translateX(-50%); width: 34px; height: 12px; background: radial-gradient(ellipse at center, rgba(255,255,255,0.75), rgba(255,255,255,0) 70%); border-radius: 50%; animation: wakePulse 1.8s ease-in-out infinite; }}
         @keyframes wakePulse {{ 0%, 100% {{ opacity: 0.5; transform: translateX(-50%) scale(0.8); }} 50% {{ opacity: 0.9; transform: translateX(-50%) scale(1.2); }} }}
+        /* Mobile Adjustments for iPhone */
+        @media (max-width: 768px) {{
+            #bottom-bar {{
+                min-width: 90vw; /* Takes up 90% of the screen on phones */
+                max-width: 95vw;
+            }}
+            
+            /* Slightly shrink the text so the days don't overlap */
+            .tl {{
+                font-size: 11px;
+            }}
+            .tl.day {{
+                font-size: 12px;
+            }}
+            
+            /* Optional: Make the time text a bit smaller to fit */
+            #time-display {{
+                font-size: 18px;
+            }}
+        }}
     </style>
 </head>
 <body class="{'forecast-mode' if is_forecast else 'live-mode'}">
