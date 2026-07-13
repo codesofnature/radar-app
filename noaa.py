@@ -221,7 +221,7 @@ def fetch_live_frame():
     now = datetime.now(timezone.utc)
     om_data = fetch_openmeteo_data()
     live_wms_url = f"https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q.cgi?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=nexrad-n0q-900913&FORMAT=image/png&TRANSPARENT=true&WIDTH={RADAR_W}&HEIGHT={RADAR_H}&SRS=EPSG:3857&BBOX={BBOX}"
-    live_label = now.astimezone(LOCAL_TZ).strftime("%a, %b %d - %I:%M %p (Live)")
+    live_label = now.astimezone(LOCAL_TZ).strftime("%b %d - %I:%M %p (Live)")
     frame = fetch_frame_data((now, live_label, live_wms_url), om_data)
     return [frame] if frame else []
 
@@ -310,15 +310,43 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         .radar-blend {{ mix-blend-mode: multiply; }}
         .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
         .temp-label {{ font-family: -apple-system, sans-serif; font-size: 20px; font-weight: 200; text-align: center; pointer-events: none; margin-top: -8px; text-shadow: 0px 1px 2px rgba(0,0,0,0.8); }}
-        #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 20px 20px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 20px; font-size: 22px; }}
+        #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 12px 14px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 18px; }}
         .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
         .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
-        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 35vw; max-width: 55vw; }}
-        #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap; }}
+        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; border: 1px solid rgba(0, 0, 0, 0.15); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 25vw; max-width: 40vw; }}
+        #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap;margin-top: -8px; }}
         #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
-        #playBtn {{ background: #4f46e5; border: none; color: white; width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }}
-        #playBtn:hover:not(:disabled) {{ background: #4338ca; }}
-        #playBtn:disabled {{ background: #475569; cursor: wait; }}
+        #playBtn {{ 
+            background: transparent; /* Removes the purple */
+            border: none; 
+            color: #888888; /* Dark grey so the ▶ icon is visible */
+            width: 34px; 
+            height: 34px; 
+            border-radius: 50%; /* Keeps it perfectly round */
+            flex-shrink: 0; 
+            cursor: pointer; 
+            font-size: 16px; /* Slightly larger icon */
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            transition: opacity 0.2s; 
+            box-shadow: none; /* Removes the 3D drop shadow */
+            
+            /* This nudges the button up to align with your slider line */
+            margin-top: -16px; 
+        }}
+
+        #playBtn:hover:not(:disabled) {{ 
+            /* A very subtle grey background when you hover over it */
+            background: rgba(150, 150, 150, 0.2); 
+            color: #555555; 
+        }}
+
+        #playBtn:disabled {{ 
+            background: transparent; 
+            color: #94a3b8; /* Faded grey when the app is loading/disabled */
+            cursor: wait; 
+        }}
         #bar-sun {{ width: 48px; height: 48px; flex-shrink: 0; position: relative; }}
         #bar-sun .sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255,200,0,0.5), rgba(255,140,0,0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; }}
         #bar-sun .sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
@@ -332,7 +360,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 22px; display: block; }}
         input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 2px; }}
         input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; background: #4ade80; margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
-        #tick-row {{ position: relative; width: 100%; height: 28px; pointer-events: none; margin-top: -12px;}}
+        #tick-row {{ position: relative; width: 100%; height: 40px; pointer-events: none; margin-top: -18px;}}
         .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
         .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
@@ -353,9 +381,13 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
         /* Change the slider thumb to red */
         input[type="range"]::-webkit-slider-thumb {{ 
-            -webkit-appearance: none; height: 32px; width: 6px; border-radius: 3px; 
-            background: #ef4444; 
-            margin-top: -14px; box-shadow: 0 0 4px rgba(0,0,0,0.3); 
+            -webkit-appearance: none; 
+            height: 32px; 
+            width: 6px; 
+            border-radius: 3px; 
+            background: #ef4444; /* Back to solid red */
+            margin-top: -14px; 
+            box-shadow: 0 0 4px rgba(0,0,0,0.3);
         }}
         #tick-canvas {{
             position: relative; width: 100%; height: 20px; pointer-events: none;
@@ -447,7 +479,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         <div id="loading-overlay">Loading...</div>
         <div id="layer-selector">
             <label class="radio-label"><input type="radio" name="layerMode" value="pure_radar" checked onchange="setLayerMode('pure_radar')">🌤️</label>
-            <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')">🌡️💧</label>
+            <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')">🌡️</label>
             <label class="radio-label"><input type="radio" name="layerMode" value="temp" onchange="setLayerMode('temp')">🗺️</label>
         </div>
         <div id="bottom-bar">
@@ -569,7 +601,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                 isPlaying = false;
             }} else {{
                 timer = setInterval(nextFrame, 450);
-                playBtn.innerHTML = "❚";
+                playBtn.innerHTML = "⏸";
                 isPlaying = true;
             }}
         }};
@@ -817,7 +849,7 @@ def render_flipbook():
                 f"&CRS=EPSG:3857&BBOX={BBOX}"
             )
             local_time = frame_time.astimezone(LOCAL_TZ)
-            time_str = local_time.strftime("%a, %b %d - %I:%M %p")
+            time_str = local_time.strftime("%b %d - %I:%M %p")
             urls_to_fetch.append((frame_time, time_str, url))
 
     accumulated = list(live_frames or [])
