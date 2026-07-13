@@ -5,6 +5,7 @@ import base64
 import concurrent.futures
 import math
 import io
+import random
 import time
 import logging
 import json
@@ -264,11 +265,11 @@ def fetch_opensky_planes():
         
         if resp.status_code == 200:
             states = resp.json().get('states', [])
-            planes = []
+            all_planes = []
             for s in states:
                 # s[5]=lon, s[6]=lat, s[7]=alt(m), s[9]=vel(m/s), s[10]=heading
                 if s[5] and s[6] and s[7] is not None and s[9] and s[10]: 
-                    planes.append({
+                    all_planes.append({
                         "callsign": s[1].strip() if s[1] else "UNKNOWN",
                         "lon": s[5],
                         "lat": s[6],
@@ -276,8 +277,8 @@ def fetch_opensky_planes():
                         "velocity": s[9], # meters per second
                         "heading": s[10]  # true north degrees
                     })
-                if len(planes) == 5:
-                    return planes
+            return all_planes # Returns the full list of hundreds of flights
+            
     except Exception as e:
         print(f"OpenSky API error: {e}")
         
@@ -289,9 +290,9 @@ def fetch_opensky_planes():
 def generate_map_html(radar_frames, mode="live", include_astronomy=True, include_decorations=True):
     is_forecast = (mode == "forecast")
     
-    # --- Fetch Real Planes ---
-    real_planes = fetch_opensky_planes()
-    planes_json = json.dumps(real_planes)
+    # Safely fetch the planes from Python's 5-minute cache
+    all_planes = fetch_opensky_planes()
+    planes_json = json.dumps(all_planes)
     
     # Calculate absolute start/end timestamps for the tick marks
     init_time = get_model_init_time()
@@ -713,64 +714,64 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         drawFrame(0);
 
         // --- A380 PLANES (Real-world routes) ---
-                // --- A380 PLANES (Real-world routes) ---
         // --- REAL OPEN-SKY PLANES ---
-        const realPlanes = {planes_json};
-        const planeMarkers = [];
-        
-        realPlanes.forEach((plane, idx) => {{
-            const trueHeading = plane.heading;
-            
-            // Adjust this offset based on how your base64 image is originally rotated
-            const imageCorrectionOffset = -65; 
-            const angle = trueHeading + imageCorrectionOffset;
-            
-            const innerPlaneHtml = b64Plane 
-                ? `<img src="${{b64Plane}}" style="width:100%; height:100%; object-fit:contain; filter:drop-shadow(3px 5px 4px rgba(0,0,0,0.4)); transform: rotate(${{angle}}deg);" />` 
-                : `<svg viewBox="0 0 100 100" style="width:100%;height:100%; transform: rotate(${{angle}}deg);"><path d="M50,5 C52,5 54,7 54,15 L54,35 L75,45 C78,46 80,48 80,51 C80,54 78,56 75,56 L54,56 L54,75 L65,85 C67,87 67,90 65,92 C63,94 60,94 58,92 L50,82 L42,92 C40,94 37,94 35,92 C33,90 33,87 35,85 L46,75 L46,56 L25,56 C22,56 20,54 20,51 C20,48 22,46 25,45 L46,35 L46,15 C46,7 48,5 50,5 Z" fill="#3b82f6" stroke="#1e40af" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+        const allPlanesCache = {planes_json};
+        let planeMarkers = [];
 
-            const planeWrapper = `
-                <div class="plane-wrapper" id="plane-wrapper-${{idx}}" style="width: 100%; height: 100%; position: relative; display: flex; justify-content: center;">
-                    <div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.25); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 800; color: #1e293b; white-space: nowrap; pointer-events: none; z-index: 10;">                        ${{plane.callsign}} • ${{Math.round(plane.velocity * 2.23694)}} mph • ${{Math.round((plane.altitude * 3.28084) / 1000)}}k ft
-                    </div>
-                    
-                    <div class="plane-shadow"></div>
-                    ${{innerPlaneHtml}}
-                </div>`;
-                
-            const planeIcon = L.divIcon({{ className: 'plane-icon-container', html: planeWrapper, iconSize: [40, 40], iconAnchor: [20, 20] }});
-            const marker = L.marker([plane.lat, plane.lon], {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
-            
-            planeMarkers.push({{ marker, plane, startTime: Date.now() }});
-        }});
+        function swapRandomPlanes() {{
+            if (!allPlanesCache || allPlanesCache.length === 0) return;
 
+            // Clear old planes from the map smoothly
+            planeMarkers.forEach(pm => map.removeLayer(pm.marker));
+            planeMarkers = [];
+
+            // Pick 5 completely random planes from the Python cache
+            const shuffled = [...allPlanesCache].sort(() => 0.5 - Math.random());
+            const selected = shuffled.slice(0, 5);
+
+            selected.forEach((plane, idx) => {{
+                const trueHeading = plane.heading;
+                const angle = trueHeading - 65; 
+
+                const innerPlaneHtml = b64Plane
+                    ? '<img src="' + b64Plane + '" style="width:100%; height:100%; object-fit:contain; filter:drop-shadow(3px 5px 4px rgba(0,0,0,0.4)); transform: rotate(' + angle + 'deg);" />'
+                    : '<svg viewBox="0 0 100 100" style="width:100%;height:100%; transform: rotate(' + angle + 'deg);"><path d="M50,5 C52,5 54,7 54,15 L54,35 L75,45 C78,46 80,48 80,51 C80,54 78,56 75,56 L54,56 L54,75 L65,85 C67,87 67,90 65,92 C63,94 60,94 58,92 L50,82 L42,92 C40,94 37,94 35,92 C33,90 33,87 35,85 L46,75 L46,56 L25,56 C22,56 20,54 20,51 C20,48 22,46 25,45 L46,35 L46,15 C46,7 48,5 50,5 Z" fill="#3b82f6" stroke="#1e40af" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+
+                const mph = Math.round(plane.velocity * 2.23694);
+                const altK = Math.round((plane.altitude * 3.28084) / 1000);
+
+                const planeWrapper = 
+                    '<div class="plane-wrapper" id="plane-wrapper-' + idx + '" style="width: 100%; height: 100%; position: relative; display: flex; justify-content: center;">' +
+                        '<div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(8px); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 800; color: #1e293b; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.25); pointer-events: none; z-index: 10;">' +
+                            plane.callsign + ' • ' + mph + ' mph • ' + altK + 'k ft' +
+                        '</div>' +
+                        '<div class="plane-shadow"></div>' +
+                        innerPlaneHtml +
+                    '</div>';
+
+                const planeIcon = L.divIcon({{ className: 'plane-icon-container', html: planeWrapper, iconSize: [40, 40], iconAnchor: [20, 20] }});
+                const marker = L.marker([plane.lat, plane.lon], {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
+
+                planeMarkers.push({{ marker, plane, startTime: Date.now() }});
+            }});
+
+
+        }}
+
+        // Run immediately, then swap every 5 seconds
+        swapRandomPlanes();
+        setInterval(swapRandomPlanes, 5000);
+
+        // Frame-by-frame physics engine to move the planes continuously
         function animatePlanes() {{
             const now = Date.now();
             planeMarkers.forEach(pm => {{
-                // Calculate how much time has passed in seconds
                 const elapsedSeconds = (now - pm.startTime) / 1000;
-                
-                // Calculate physical distance traveled based on real speed (m/s)
                 const distanceMeters = pm.plane.velocity * elapsedSeconds;
-                
-                // Convert heading to radians for math
                 const headingRad = pm.plane.heading * (Math.PI / 180);
-                
-                // 1 degree of latitude is roughly 111,320 meters
                 const latDrift = (distanceMeters * Math.cos(headingRad)) / 111320;
-                
-                // 1 degree of longitude narrows based on the current latitude
                 const lonDrift = (distanceMeters * Math.sin(headingRad)) / (111320 * Math.cos(pm.plane.lat * (Math.PI / 180)));
-                
-                const newLat = pm.plane.lat + latDrift;
-                const newLon = pm.plane.lon + lonDrift;
-                
-                pm.marker.setLatLng([newLat, newLon]);
-                
-                const wrapper = document.getElementById(`plane-wrapper-${{planeMarkers.indexOf(pm)}}`);
-                if (wrapper) {{
-                    wrapper.classList.add('loaded');
-                }}
+                pm.marker.setLatLng([pm.plane.lat + latDrift, pm.plane.lon + lonDrift]);
             }});
             requestAnimationFrame(animatePlanes);
         }}
