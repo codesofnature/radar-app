@@ -760,9 +760,9 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
         }}
 
-        // Run immediately, then swap every 5 seconds
+        // Run immediately, then swap every 30 seconds
         swapRandomPlanes();
-        setInterval(swapRandomPlanes, 5000);
+        setInterval(swapRandomPlanes, 30000);
 
         // Frame-by-frame physics engine to move the planes continuously
         function animatePlanes() {{
