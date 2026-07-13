@@ -304,8 +304,9 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.8.0/suncalc.min.js"></script>
     <style>
-        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden; }}
-        #map-container {{ position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }}
+        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden;position: fixed; 
+    width: 100%; height: 100dvh; }}
+        #map-container {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; }}
         #map {{ width: 100%; height: 100%; background: transparent; }}
         .radar-blend {{ mix-blend-mode: multiply; }}
         .radar-blend img {{ filter: drop-shadow(-10px 10px 8px rgba(0, 0, 0, 0.5)); }}
@@ -313,7 +314,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 12px 14px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 18px; }}
         .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
         .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
-        #bottom-bar {{ position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; border: 1px solid rgba(0, 0, 0, 0.15); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 25vw; max-width: 40vw; }}
+        #bottom-bar {{ position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; border: 1px solid rgba(0, 0, 0, 0.15); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 25vw; max-width: 40vw; }}
         #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap;margin-top: -8px; }}
         #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
         #playBtn {{ 
