@@ -252,9 +252,46 @@ def fetch_forecast_frames():
             return frames_data
         init_time = init_time - timedelta(hours=1)
     return frames_data
+import json # Make sure this is imported at the top
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_opensky_planes():
+    # US Bounding Box: lamin=24.0, lomin=-125.0, lamax=50.0, lomax=-66.0
+    url = "https://opensky-network.org/api/states/all?lamin=24.0&lomin=-125.0&lamax=50.0&lomax=-66.0"
+    
+    try:
+        resp = requests.get(url, timeout=10)
+        
+        if resp.status_code == 200:
+            states = resp.json().get('states', [])
+            planes = []
+            for s in states:
+                # s[5]=lon, s[6]=lat, s[7]=alt(m), s[9]=vel(m/s), s[10]=heading
+                if s[5] and s[6] and s[7] is not None and s[9] and s[10]: 
+                    planes.append({
+                        "callsign": s[1].strip() if s[1] else "UNKNOWN",
+                        "lon": s[5],
+                        "lat": s[6],
+                        "altitude": s[7], # meters
+                        "velocity": s[9], # meters per second
+                        "heading": s[10]  # true north degrees
+                    })
+                if len(planes) == 5:
+                    return planes
+    except Exception as e:
+        print(f"OpenSky API error: {e}")
+        
+    # Fallback if API fails
+    return [
+        {"callsign": "API_FAIL1", "lat": 40.64, "lon": -73.77, "altitude": 10000, "velocity": 250, "heading": 270},
+        {"callsign": "API_FAIL2", "lat": 33.94, "lon": -118.40, "altitude": 10500, "velocity": 230, "heading": 90}
+    ]
 def generate_map_html(radar_frames, mode="live", include_astronomy=True, include_decorations=True):
     is_forecast = (mode == "forecast")
+    
+    # --- Fetch Real Planes ---
+    real_planes = fetch_opensky_planes()
+    planes_json = json.dumps(real_planes)
     
     # Calculate absolute start/end timestamps for the tick marks
     init_time = get_model_init_time()
@@ -677,64 +714,59 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
         // --- A380 PLANES (Real-world routes) ---
                 // --- A380 PLANES (Real-world routes) ---
-        const a380Routes = [
-            {{ start: [33.94, -118.40], end: [40.64, -73.77], callsign: "UAE201", duration: 425000 }},
-            {{ start: [25.94, -118.40], end: [40.64, -73.77], callsign: "BAW213", duration: 118000 }}
-        ];
+        // --- REAL OPEN-SKY PLANES ---
+        const realPlanes = {planes_json};
         const planeMarkers = [];
         
-        a380Routes.forEach((route, idx) => {{
-            // 1. Calculate map-accurate screen vectors
-            // Web Mercator maps compress longitude at higher latitudes.
-            // We must scale the longitude difference by cos(midpoint_latitude) 
-            // so the plane points exactly along its visual flight path.
-            //<!-- In generate_map_html, the plane angle calculation section: -->
-            const dLat = route.end[0] - route.start[0];
-            const dLon = route.end[1] - route.start[1];
-            const midLatRad = ((route.start[0] + route.end[0]) / 2) * (Math.PI / 180);
-            const dLonScaled = dLon * Math.cos(midLatRad);
-
-            // 1. Calculate the true heading based purely on the route.
-            // This natively outputs: 0 for North, 90 for East, 180 for South, -90 for West
-            const trueHeading = Math.atan2(dLonScaled, dLat) * (180 / Math.PI);
-
-            // 2. Apply a fixed correction based ONLY on how your image was drawn.
-            // - If your original image naturally points UP (North): use 0
-            // - If your original image naturally points RIGHT (East): use -90
-            // - If your original image naturally points LEFT (West): use 90
-            const imageCorrectionOffset = -65; // Change this one number to fit your image
-
-            // 3. The final CSS angle is the true heading plus the correction
+        realPlanes.forEach((plane, idx) => {{
+            const trueHeading = plane.heading;
+            
+            // Adjust this offset based on how your base64 image is originally rotated
+            const imageCorrectionOffset = -65; 
             const angle = trueHeading + imageCorrectionOffset;
             
-            // NOTE: If your plane image points RIGHT (East) by default, comment out the line above and use this:
-            // const angle = baseAngle;
-
-            // 1. ADD the transform: rotate(${{angle}}deg); here to the img and svg directly
             const innerPlaneHtml = b64Plane 
                 ? `<img src="${{b64Plane}}" style="width:100%; height:100%; object-fit:contain; filter:drop-shadow(3px 5px 4px rgba(0,0,0,0.4)); transform: rotate(${{angle}}deg);" />` 
                 : `<svg viewBox="0 0 100 100" style="width:100%;height:100%; transform: rotate(${{angle}}deg);"><path d="M50,5 C52,5 54,7 54,15 L54,35 L75,45 C78,46 80,48 80,51 C80,54 78,56 75,56 L54,56 L54,75 L65,85 C67,87 67,90 65,92 C63,94 60,94 58,92 L50,82 L42,92 C40,94 37,94 35,92 C33,90 33,87 35,85 L46,75 L46,56 L25,56 C22,56 20,54 20,51 C20,48 22,46 25,45 L46,35 L46,15 C46,7 48,5 50,5 Z" fill="#3b82f6" stroke="#1e40af" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
 
-            // 2. REMOVE the transform from the wrapper so the shadow stays locked at the bottom
             const planeWrapper = `
-                <div class="plane-wrapper" id="plane-wrapper-${{idx}}" style="width: 100%; height: 100%; position: relative;">
+                <div class="plane-wrapper" id="plane-wrapper-${{idx}}" style="width: 100%; height: 100%; position: relative; display: flex; justify-content: center;">
+                    <div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.25); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 800; color: #1e293b; white-space: nowrap; pointer-events: none; z-index: 10;">                        ${{plane.callsign}} • ${{Math.round(plane.velocity * 2.23694)}} mph • ${{Math.round((plane.altitude * 3.28084) / 1000)}}k ft
+                    </div>
+                    
                     <div class="plane-shadow"></div>
                     ${{innerPlaneHtml}}
                 </div>`;
                 
             const planeIcon = L.divIcon({{ className: 'plane-icon-container', html: planeWrapper, iconSize: [40, 40], iconAnchor: [20, 20] }});
-            const marker = L.marker(route.start, {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
-            planeMarkers.push({{ marker, route, startTime: Date.now() + (idx * 5000), rotation: angle }});
+            const marker = L.marker([plane.lat, plane.lon], {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
+            
+            planeMarkers.push({{ marker, plane, startTime: Date.now() }});
         }});
 
         function animatePlanes() {{
+            const now = Date.now();
             planeMarkers.forEach(pm => {{
-                const now = Date.now();
-                let progress = (now - pm.startTime) / pm.route.duration;
-                if (progress > 1) {{ pm.startTime = Date.now(); progress = 0; }}
-                const dy = pm.route.end[0] - pm.route.start[0];
-                const dx = pm.route.end[1] - pm.route.start[1];
-                pm.marker.setLatLng([pm.route.start[0] + dy * progress, pm.route.start[1] + dx * progress]);
+                // Calculate how much time has passed in seconds
+                const elapsedSeconds = (now - pm.startTime) / 1000;
+                
+                // Calculate physical distance traveled based on real speed (m/s)
+                const distanceMeters = pm.plane.velocity * elapsedSeconds;
+                
+                // Convert heading to radians for math
+                const headingRad = pm.plane.heading * (Math.PI / 180);
+                
+                // 1 degree of latitude is roughly 111,320 meters
+                const latDrift = (distanceMeters * Math.cos(headingRad)) / 111320;
+                
+                // 1 degree of longitude narrows based on the current latitude
+                const lonDrift = (distanceMeters * Math.sin(headingRad)) / (111320 * Math.cos(pm.plane.lat * (Math.PI / 180)));
+                
+                const newLat = pm.plane.lat + latDrift;
+                const newLon = pm.plane.lon + lonDrift;
+                
+                pm.marker.setLatLng([newLat, newLon]);
+                
                 const wrapper = document.getElementById(`plane-wrapper-${{planeMarkers.indexOf(pm)}}`);
                 if (wrapper) {{
                     wrapper.classList.add('loaded');
