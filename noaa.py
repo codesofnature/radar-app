@@ -263,32 +263,31 @@ def fetch_opensky_planes():
         "User-Agent": "InstantRadar/1.0 (streamlit.app)"
     }
     try:
-        resp = requests.get(url, timeout=10)
-        
+        resp = requests.get(url, headers=headers, timeout=10) # add headers=
+
         if resp.status_code == 200:
             states = resp.json().get('states', [])
             all_planes = []
             for s in states:
-                # s[5]=lon, s[6]=lat, s[7]=alt(m), s[9]=vel(m/s), s[10]=heading
-                if s[5] and s[6] and s[7] is not None and s[9] and s[10]: 
+                if s[5] and s[6] and s[7] is not None and s[9] and s[10]:
                     all_planes.append({
                         "callsign": s[1].strip() if s[1] else "UNKNOWN",
                         "lon": s[5],
                         "lat": s[6],
-                        "altitude": s[7], # meters
-                        "velocity": s[9], # meters per second
-                        "heading": s[10]  # true north degrees
+                        "altitude": s[7],
+                        "velocity": s[9],
+                        "heading": s[10]
                     })
-            return all_planes # Returns the full list of hundreds of flights
-            
+            return all_planes[:50] # Optional: cap at 50 so mobile doesn't choke
+
+        elif resp.status_code == 429: # Rate limited
+            logger.warning("OpenSky rate limited")
+            return []
+
     except Exception as e:
-        print(f"OpenSky API error: {e}")
-        
-    # Fallback if API fails
-    return [
-        {"callsign": "API_FAIL1", "lat": 40.64, "lon": -73.77, "altitude": 10000, "velocity": 250, "heading": 270},
-        {"callsign": "API_FAIL2", "lat": 33.94, "lon": -118.40, "altitude": 10500, "velocity": 230, "heading": 90}
-    ]
+        logger.error(f"OpenSky API error: {e}")
+
+    return [] # Return empty instead of fake planes
 def generate_map_html(radar_frames, mode="live", include_astronomy=True, include_decorations=True):
     is_forecast = (mode == "forecast")
     
