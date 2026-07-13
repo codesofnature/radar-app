@@ -715,17 +715,18 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
         // --- A380 PLANES (Real-world routes) ---
         // --- REAL OPEN-SKY PLANES ---
-        const allPlanesCache = {planes_json};
+        // --- REAL OPEN-SKY PLANES ---
+        // Python has already injected the data here, so the iPhone just reads it
+        const allPlanesCache = {planes_json}; 
         let planeMarkers = [];
 
+        // This function now uses the data Python already gave it
         function swapRandomPlanes() {{
             if (!allPlanesCache || allPlanesCache.length === 0) return;
 
-            // Clear old planes from the map smoothly
             planeMarkers.forEach(pm => map.removeLayer(pm.marker));
             planeMarkers = [];
 
-            // Pick 5 completely random planes from the Python cache
             const shuffled = [...allPlanesCache].sort(() => 0.5 - Math.random());
             const selected = shuffled.slice(0, 5);
 
