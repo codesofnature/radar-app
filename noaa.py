@@ -145,24 +145,28 @@ def generate_temp_overlay(target_dt, om_data):
         t = np.clip(smooth_temps, -60, 120)
         colors = np.zeros((RADAR_H, RADAR_W, 4), dtype=np.uint8)
 
-        m1 = t <= 50
-        m2 = (t > 50) & (t <= 80)
-        m3 = t > 80
+        # 1. Dark Blue to Light Blue (-20 to 60)
+        m1 = (t >= -20) & (t < 60)
+        f1 = np.clip((t[m1] + 20) / 80.0, 0, 1)
+        colors[m1, 0] = (173 * f1).astype(np.uint8) # Increasing R for light blue
+        colors[m1, 1] = (216 * f1).astype(np.uint8) # Increasing G for light blue
+        colors[m1, 2] = (139 + (116 * f1)).astype(np.uint8) # Shift 139 to 255
 
-        f1 = (t[m1] + 60) / 110.0
-        colors[m1, 0] = 255 - (255 * f1)
-        colors[m1, 1] = 255
-        colors[m1, 2] = 255 - (255 * f1)
+        # 2. Light Green to Dark Green (60 to 82)
+        # Range = 22 degrees
+        m2 = (t >= 60) & (t < 82)
+        f2 = np.clip((t[m2] - 60) / 22.0, 0, 1)
+        colors[m2, 0] = (144 - (144 * f2)).astype(np.uint8) # R drops to 0
+        colors[m2, 1] = (238 - (138 * f2)).astype(np.uint8) # G drops to 100
+        colors[m2, 2] = (144 - (144 * f2)).astype(np.uint8) # B drops to 0
 
-        f2 = (t[m2] - 50) / 30.0
-        colors[m2, 0] = 255 * f2
-        colors[m2, 1] = 255 - (255 * f2)
-        colors[m2, 2] = 0
-
-        f3 = (t[m3] - 80) / 40.0
-        colors[m3, 0] = 255 - (127 * f3)
-        colors[m3, 1] = 0
-        colors[m3, 2] = 0
+        # 3. Light Red to Dark Red (83 to 120)
+        # Range = 37 degrees
+        m3 = (t >= 82)
+        f3 = np.clip((t[m3] - 83) / 37.0, 0, 1)
+        colors[m3, 0] = (255 - (116 * f3)).astype(np.uint8) # R drops to 139
+        colors[m3, 1] = (182 - (182 * f3)).astype(np.uint8) # G drops to 0
+        colors[m3, 2] = (193 - (193 * f3)).astype(np.uint8) # B drops to 0
 
         colors[:, :, 3] = 45
 
@@ -885,7 +889,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         }}
         
         if (totalFrames === 0) {{
-            timeDisplay.innerText = "Waiting for data...";
+            timeDisplay.innerText = "NOAA Satellites Locked...";
             if (loadingOverlay) loadingOverlay.classList.add('hidden');
         }}
         
