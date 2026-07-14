@@ -679,19 +679,17 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                 uniform float u_tailY;
                 uniform float u_aspect;
 
-                // Standard distance to a line segment
                 float sdCapsule( vec2 p, vec2 a, vec2 b, float r ) {{
                     vec2 pa = p - a, ba = b - a;
                     float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0, 1.0 );
                     return length( pa - ba*h ) - r;
                 }}
 
-                // Global map function to calculate shape
                 float map(vec2 p) {{
                     vec2 head = vec2(0.0, u_headY);
                     vec2 tail = vec2(0.0, u_tailY);
                     
-                    // Radius 0.44 fills the width beautifully without clipping
+                    // Radius set to 0.44 to ensure it NEVER clips the CSS border
                     return sdCapsule(p, head, tail, 0.44);
                 }}
 
@@ -699,43 +697,43 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                     vec2 uv = vUv - 0.5;
                     uv.y *= u_aspect;
 
-                    // Evaluate our distance field
                     float d = map(uv);
-                    float alpha = smoothstep(0.015, 0.0, d);
-
-                    // --- FAKE 3D LIGHTING ENGINE ---
                     
-                    // 1. Calculate the surface Normal (the 3D slope of the shape)
+                    // --- THE FIX ---
+                    // Softened from 0.015 to 0.035 for a butter-smooth, anti-aliased edge
+                    float alpha = smoothstep(0.05, 0.0, d);
+
+                    // 1. Surface Normal
                     vec2 eps = vec2(0.01, 0.0);
                     vec3 normal = normalize(vec3(
                         map(uv + eps.xy) - map(uv - eps.xy),
                         map(uv + eps.yx) - map(uv - eps.yx),
-                        0.08 // Z-thickness of the jelly
+                        0.08 
                     ));
 
-                    // 2. Light setup (hitting from top-left)
+                    // 2. Light setup 
                     vec3 lightDir = normalize(vec3(-1.0, 1.0, 1.5));
                     float diffuse = max(dot(normal, lightDir), 0.0);
 
-                    // 3. Specular highlight (the shiny glass reflection)
+                    // 3. Specular highlight 
                     vec3 viewDir = vec3(0.0, 0.0, 1.0);
                     vec3 halfDir = normalize(lightDir + viewDir);
                     float specular = pow(max(dot(normal, halfDir), 0.0), 32.0);
 
                     // 4. Colors
-                    vec3 shadowColor = vec3(0.75, 0.80, 0.90); // Darker blue/grey edge
-                    vec3 highlightColor = vec3(1.0, 1.0, 1.0); // Pure white top
+                    vec3 shadowColor = vec3(0.75, 0.80, 0.90); 
+                    vec3 highlightColor = vec3(1.0, 1.0, 1.0); 
                     
                     vec3 finalJellyColor = mix(shadowColor, highlightColor, diffuse);
-                    finalJellyColor += specular * 0.8; // Apply the gloss
+                    finalJellyColor += specular * 0.8; 
 
-                    // 5. Drop shadow (offset slightly down and right)
+                    // 5. Drop shadow
                     float dShadow = map(uv - vec2(0.02, -0.02));
-                    float shadowAlpha = smoothstep(0.15, 0.0, dShadow) * 0.35; // Soft blur
+                    float shadowAlpha = smoothstep(0.15, 0.0, dShadow) * 0.35; 
 
-                    // 6. Blend the drop shadow and the 3D jelly shape
+                    // 6. Blend
                     vec4 shadowLayer = vec4(0.0, 0.0, 0.0, shadowAlpha);
-                    vec4 jellyLayer = vec4(finalJellyColor, 0.95); // 95% opaque
+                    vec4 jellyLayer = vec4(finalJellyColor, 0.95); 
 
                     gl_FragColor = mix(shadowLayer, jellyLayer, alpha);
                 }}
@@ -747,14 +745,14 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         jScene.add(jMesh);
 
         function animateJelly() {{
-            // 1. Head shoots quickly toward the target
-            const headForce = (targetY - headY) * 0.12;
-            headVel = (headVel + headForce) * 0.65;
+            // Very slow pull (0.04) but very slippery friction (0.85)
+            const headForce = (targetY - headY) * 0.04;
+            headVel = (headVel + headForce) * 0.85;
             headY += headVel;
 
-            // 2. Tail drags heavily behind the head (This is the GOO!)
-            const tailForce = (headY - tailY) * 0.10;
-            tailVel = (tailVel + tailForce) * 0.55;
+            // Tail drags far behind
+            const tailForce = (headY - tailY) * 0.03;
+            tailVel = (tailVel + tailForce) * 0.80;
             tailY += tailVel;
 
             jMaterial.uniforms.u_headY.value = headY;
@@ -1016,9 +1014,11 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                 const altK = Math.round((plane.altitude * 3.28084) / 1000);
                 const planeWrapper = 
                     '<div class="plane-wrapper" id="plane-wrapper-' + idx + '" style="width: 100%; height: 100%; position: relative; display: flex; justify-content: center;">' +
-                        '<div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(8px); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 800; color: #1e293b; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.25); pointer-events: none; z-index: 10;">' +
+                        // --- MAXIMUM TRANSLUCENCY FIX ---
+                        '<div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 2px 8px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1); font-size: 11px; font-weight: 800; color: #0f172a; white-space: nowrap; box-shadow: none; text-shadow: none; pointer-events: none; z-index: 10;">' +
                             plane.callsign + ' • ' + mph + ' mph • ' + altK + 'k ft' +
                         '</div>' +
+                        // ------------------------------------
                         '<div class="plane-shadow"></div>' +
                         innerPlaneHtml +
                     '</div>';
