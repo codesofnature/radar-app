@@ -270,13 +270,26 @@ def fetch_opensky_planes():
             states = resp.json().get('states', [])
             planes = []
             for s in states:
+                # s[5]=lon, s[6]=lat, s[7]=alt(m), s[9]=vel(m/s), s[10]=heading
                 if s[5] and s[6] and s[7] is not None and s[9] and s[10]:
-                    planes.append({
-                        "callsign": s[1].strip() if s[1] else "UNKNOWN",
-                        "lon": s[5], "lat": s[6],
-                        "altitude": s[7], "velocity": s[9], "heading": s[10]
-                    })
-            return planes[:150] # Cap at 30 for mobile perf
+                    
+                    # HEURISTIC OVERRIDE: Since category tags are often blank, 
+                    # we filter out small planes by checking physics.
+                    # 7000 meters = ~23,000 feet. 180 m/s = ~400 mph.
+                    # Only large jets fly this high and fast.
+                    cat = s[17] if len(s) > 17 else 0
+                    is_large_category = cat in [4, 5, 6]
+                    is_high_altitude = s[7] > 7000
+                    is_fast = s[9] > 180
+                    
+                    if is_large_category or is_high_altitude or is_fast:
+                        planes.append({
+                            "callsign": s[1].strip() if s[1] else "UNKNOWN",
+                            "lon": s[5], "lat": s[6],
+                            "altitude": s[7], "velocity": s[9], "heading": s[10]
+                        })
+            
+            return planes[:150] # Kept the pool large so the iPhone has plenty to pick from
 
         elif resp.status_code == 429:
             logger.warning("OpenSky rate limited - too many requests")
@@ -302,14 +315,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
     first_ts_val = int(init_time.timestamp() * 1000)
     last_ts_val = int((init_time + timedelta(minutes=48*60)).timestamp() * 1000)
 
-    # include_astronomy=False skips the NASA sun/moon network fetches entirely so the
     if include_astronomy:
         sun_img_data = get_embedded_sun_image()
         moon_img_data = get_embedded_moon_image()
     else:
         sun_img_data, moon_img_data = "", ""
 
-    # High-quality, pre-cleaned icon data URIs (embedded, no disk/network dependency)
     plane_b64 = f"data:image/png;base64,{PLANE_ICON_B64}"
     dolphin_b64 = f"data:image/png;base64,{DOLPHIN_ICON_B64}"
     
@@ -320,11 +331,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         frames_js_list.append(f"""{{ ts: {ts_val}, time: '{f["time"]}', radarImg: '{f["radarImg"]}', tempImg: '{f["tempImg"]}', tempGrid: {grid_json} }}""")
     js_frames_array = ",\n".join(frames_js_list)
 
+    # --- HTML Blocks with robust layout states ---
     sun_html = f"""
     <div id="sun-indicator">
         <div class="sun-glow"></div>
         <div class="sun-image-container">
-            <img class="sun-image" src="{sun_img_data}" alt="Sun" onerror="this.style.display='none'">
+            <img class="sun-image" src="{sun_img_data}" alt="Sun">
         </div>
     </div>"""
     
@@ -332,7 +344,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
     <div id="moon-indicator">
         <div class="moon-glow"></div>
         <div class="moon-image-container">
-            <img class="moon-image" src="{moon_img_data}" alt="Moon" onerror="this.style.display='none'">
+            <img class="moon-image" src="{moon_img_data}" alt="Moon">
             <div class="moon-phase-shadow" id="moonShadow"></div>
         </div>
     </div>"""
@@ -345,8 +357,7 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.8.0/suncalc.min.js"></script>
     <style>
-        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden;position: fixed; 
-    width: 100%; height: 100dvh; }}
+        body {{ margin: 0; padding: 0; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; overflow: hidden;position: fixed; width: 100%; height: 100dvh; }}
         #map-container {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh; }}
         #map {{ width: 100%; height: 100%; background: transparent; }}
         .radar-blend {{ mix-blend-mode: multiply; }}
@@ -355,102 +366,136 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         #layer-selector {{ position: absolute; top: 50%; left: 30px; transform: translateY(-50%); z-index: 9999; background: rgba(255,255,255,0.85); backdrop-filter: blur(14px); border: 1px solid rgba(0,0,0,0.12); padding: 12px 14px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); display: flex; flex-direction: column; align-items: flex-start; gap: 12px; font-size: 18px; }}
         .radio-label {{ display: flex; align-items: center; gap: 6px; cursor: pointer; color: #333333; }}
         .radio-label input[type="radio"] {{ accent-color: #818cf8; cursor: pointer; width: 16px; height: 16px; }}
-        #bottom-bar {{ position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; border: 1px solid rgba(0, 0, 0, 0.15); background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(12px); border-radius: 30px; padding: 10px 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 25vw; max-width: 40vw; }}
-        #time-display {{ font-size: 22px; font-weight: 700; color: #333333; white-space: nowrap;margin-top: -8px; }}
-        #slider-row {{ display: flex; align-items: center; gap: 10px; width: 100%; }}
-        #playBtn {{ 
-            background: transparent; /* Removes the purple */
+        
+        #bottom-bar {{ 
+            position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; 
+            border: 1px solid rgba(255, 255, 255, 0.15); 
+            background: rgba(255, 255, 255, 0.15); 
+            backdrop-filter: blur(4px); 
+            border-radius: 24px; /* Slightly rounder for the larger size */
+            padding: 12px 24px 8px; /* Massive increase in padding for breathing room */
+            display: flex; flex-direction: column; align-items: center; gap: 4px; 
+            width: 85vw; /* Takes up most of the screen width now */
+            max-width: 600px; /* Allows it to get much wider on desktop/tablets */
+        }}
+
+        #time-display {{ 
+            font-size: 20px; 
+            font-weight: 700; 
+            color: #ffffff; 
+            background-color: #ef4444; 
+            padding: 8px 24px; 
+            min-width: 200px; 
+            text-align: center; 
+            border-radius: 999px; 
             border: none; 
-            color: #888888; /* Dark grey so the ▶ icon is visible */
-            width: 34px; 
-            height: 34px; 
-            border-radius: 50%; /* Keeps it perfectly round */
-            flex-shrink: 0; 
-            cursor: pointer; 
-            font-size: 16px; /* Slightly larger icon */
-            display: flex; 
-            align-items: center; 
-            justify-content: center; 
-            transition: opacity 0.2s; 
-            box-shadow: none; /* Removes the 3D drop shadow */
+            outline: none; 
             
-            /* This nudges the button up to align with your slider line */
-            margin-top: -16px; 
+            /* -- MELTING FIX 1: Completely removed the shadow to kill the hard line -- */
+            box-shadow: none; 
+            
+            margin-top: 8px; 
+            margin-bottom: 0px; /* Eliminated bottom margin so it sits right against the track */
+            z-index: 6; /* Keeps it layered cleanly */
         }}
 
-        #playBtn:hover:not(:disabled) {{ 
-            /* A very subtle grey background when you hover over it */
-            background: rgba(150, 150, 150, 0.2); 
-            color: #555555; 
+        #slider-row {{ 
+            display: flex; align-items: center; 
+            gap: 16px; /* Pushes the play button further away from the track */
+            width: 100%; 
         }}
 
-        #playBtn:disabled {{ 
-            background: transparent; 
-            color: #94a3b8; /* Faded grey when the app is loading/disabled */
-            cursor: wait; 
+        #playBtn {{ 
+            background: transparent; border: none; color: #888888; 
+            width: 44px; height: 44px; /* Much larger button touch target */
+            border-radius: 50%; flex-shrink: 0; cursor: pointer; 
+            font-size: 24px; /* Much larger play/pause icon */
+            display: flex; align-items: center; justify-content: center; 
+            transition: opacity 0.2s; box-shadow: none; margin-top: 0px; 
         }}
-        #bar-sun {{ width: 48px; height: 48px; flex-shrink: 0; position: relative; }}
-        #bar-sun .sun-glow {{ position: absolute; top: -30%; left: -30%; width: 160%; height: 160%; border-radius: 50%; background: radial-gradient(circle, rgba(255,200,0,0.5), rgba(255,140,0,0.3) 40%, transparent 70%); animation: glowPulse 3s ease-in-out infinite; }}
-        #bar-sun .sun-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; animation: sunPulse 4s ease-in-out infinite; }}
-        #bar-sun .sun-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; transform: scale(1.4); filter: drop-shadow(0 0 10px rgba(255,200,0,0.9)); }}
-        #bar-moon {{ width: 44px; height: 44px; flex-shrink: 0; position: relative; }}
-        #bar-moon .moon-glow {{ position: absolute; top: -20%; left: -20%; width: 140%; height: 140%; border-radius: 50%; background: radial-gradient(circle, rgba(200,200,255,0.4), transparent 60%); animation: moonGlow 5s ease-in-out infinite; }}
-        #bar-moon .moon-image-container {{ position: relative; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; box-shadow: 0 0 14px 4px rgba(200,200,255,0.35); }}
-        #bar-moon .moon-image {{ width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }}
-        #bar-moon .moon-phase-shadow {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0a0a1a; border-radius: 50%; transition: clip-path 0.5s ease; }}
+        #playBtn:hover:not(:disabled) {{ background: rgba(150, 150, 150, 0.2); color: #555555; }}
+        #playBtn:disabled {{ background: transparent; color: #94a3b8; cursor: wait; }}
+        .scrubber-container {{ 
+            position: relative; overflow: hidden; 
+            height: 75px; /* Huge increase in height for a massive slider area */
+            width: 100%; display: flex; align-items: center; 
+            mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent); 
+            -webkit-mask-image: linear-gradient(to right, transparent, black 15%, black 85%, transparent); 
+        }}
+        
+        #fixed-playhead {{ 
+            position: absolute; 
+            left: 50%; 
+            
+            /* -- MELTING FIX 2 & 3: Shifted up and made taller to physically merge with the box -- */
+            top: 15%; 
+            height: 85px; 
+            width: 12px; 
+            
+            border-radius: 6px; 
+            background: #ef4444; 
+            transform: translate(-50%, -50%); 
+            
+            /* -- MELTING FIX 1: Removed shadow here too so the red tones match identically -- */
+            box-shadow: none; 
+            
+            z-index: 5; 
+            pointer-events: none; 
+        }}
+        
+        #moving-track {{ 
+            position: absolute; left: 50%; top: 40%; 
+            width: 250%; height: 75px; /* Matches new container height */
+            transform: translateY(-50%); 
+            transition: transform 0.1s linear; z-index: 2; pointer-events: none; 
+        }}
+        
+        #track-line {{ 
+            position: absolute; top: 24px; left: 0; 
+            width: 100%; height: 4px; /* Thicker horizontal line */
+            background: rgba(0,0,0,0.20); border-radius: 6px; 
+        }}
+        
+        #tick-row {{ 
+            position: absolute; top: 24px; left: 0; 
+            width: 100%; height: 50px; 
+        }}
         .slider-col {{ flex: 1; display: flex; flex-direction: column; gap: 0; }}
-        input[type="range"] {{ -webkit-appearance: none; background: transparent; cursor: pointer; margin: 0; width: 100%; height: 70px; display: block; }}
-        input[type="range"]::-webkit-slider-runnable-track {{ width: 100%; height: 3px; background: rgba(0,0,0,0.20); border-radius: 6px; }}
-        input[type="range"]::-webkit-slider-thumb {{ -webkit-appearance: none; height: 60px; width: 12px; border-radius: 6px; background: #ef4444; margin-top: -26px; box-shadow: 0 0 4px rgba(0,0,0,0.3); }}
-        #tick-row {{ position: relative; width: 100%; height: 40px; pointer-events: none; margin-top: -36px;}}
+        
+        input[type="range"] {{ 
+            -webkit-appearance: none; 
+            position: absolute; top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            opacity: 0; cursor: grab; z-index: 10; margin: 0; 
+        }}
+        input[type="range"]:active {{ cursor: grabbing; }}
+
         .tk {{ position: absolute; top: 0; width: 1px; background: rgba(0,0,0,0.25); transform: translateX(-50%); }}
         .tk.maj {{ background: rgba(0,0,0,0.45); }}
-        .tl {{ position: absolute; top: 10px; font-size: 13px; font-family: -apple-system, sans-serif; color: #333; font-weight: 600; transform: translateX(-50%); white-space: nowrap; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); }}
-        .tl.day {{ color: #000; font-weight: 900; font-size: 18px; }}
-        .now-flag {{ position: absolute; top: -14px; display: flex; flex-direction: column; align-items: center; transform: translateX(-50%); pointer-events: none; height: 70px; }}
-        /* Change the 'Now' indicator to green */
-        .now-flag .now-bar {{
-            width: 20px;
-            height: 500%;
-            background: #4ade80;
-            border-radius: 2px;
-            box-shadow: 0 1px 4px rgba(0,0,0,.4);
-        }}
-        .now-flag .now-lbl {{ 
-            font-size: 12px; font-weight: 900; color: #4ade80; 
-            margin-top: 2px; text-shadow: 0px 1px 3px rgba(255,255,255,0.9); 
-        }}
-
-        
-        #tick-canvas {{
-            position: relative; width: 100%; height: 20px; pointer-events: none;
-        }}
-        .tick-mark {{
-            position: absolute; top: 0;
-            width: 1px; background: rgba(255,255,255,0.35); height: 6px;
-            transform: translateX(-50%);
-        }}
-        .tick-mark.major {{
-            height: 9px; background: rgba(255,255,255,0.6); width: 1px;
-        }}
-        .tick-label {{
-            position: absolute; top: 8px;
-            font-size: 10px; color: rgba(255,255,255,0.55); font-weight: 500;
-            transform: translateX(-50%); white-space: nowrap;
-        }}
-        .tick-label.now-tick {{
-            color: #fff; font-weight: 800; font-size: 11px;
-        }}
-        .now-pointer {{
-            position: absolute; top: -18px; font-size: 9px; color: #fff;
-            transform: translateX(-50%); line-height: 1;
+        .tl {{ 
+            position: absolute; 
+            top: 20px; /* Pushed further down to clear the larger ticks */
+            font-size: 14px; /* Bigger time labels (e.g. 12pm) */
+            font-family: -apple-system, sans-serif; 
+            color: #333; font-weight: 600; 
+            transform: translateX(-50%); white-space: nowrap; 
+            text-shadow: 0px 1px 3px rgba(255,255,255,0.9); 
         }}
         
-        /* UPDATED LOADING OVERLAY: Now a floating pill so the map is visible behind it immediately */
+        .tl.day {{ 
+            color: #000; font-weight: 800; 
+            font-size: 18px; /* Bigger day labels (e.g. Tue) */
+            top: 18px; 
+        }}
+        /* Hides the default broken image icon safely until the data URI loads */
+        .sun-image[src=""], .moon-image[src=""] {{
+            visibility: hidden;
+        }}
+        .sun-image:not([src=""]), .moon-image:not([src=""]) {{
+            visibility: visible;
+        }}
         #loading-overlay {{ position: absolute; top: 80px; left: 50%; transform: translateX(-50%); background: rgba(255,255,255,0.85); backdrop-filter: blur(8px); border-radius: 20px; padding: 10px 24px; z-index: 10000; font-size: 16px; font-weight: bold; color: #334155; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: opacity 0.4s ease-out; pointer-events: none; }}
         #loading-overlay.hidden {{ opacity: 0; pointer-events: none; visibility: hidden; }}
-
-        
         .leaflet-top.leaflet-right {{ top: 15px; right: 15px; }}
         
         #sun-indicator {{ position: absolute; bottom: 25px; left: 25px; z-index: 9999; width: 80px; height: 80px; transition: opacity 0.5s ease, transform 0.5s ease; pointer-events: none; opacity: 0; }}
@@ -473,63 +518,25 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         
         .dolphin-container {{ pointer-events: none; }}
         .dolphin-wrapper {{ width: 100%; height: 100%; position: relative; }}
-
-        /* New Dolphin Bobbing & Shadow CSS */
-        .dolphin-bobbing {{
-            width: 100%;
-            height: 100%;
-            animation: dolphinBob 2.5s ease-in-out infinite;
-        }}
-        .dolphin-shadow {{
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 120%;
-            height: 25%;
-            background: radial-gradient(ellipse, rgba(0, 30, 80, 0.4), transparent 60%);
-            border-radius: 50%;
-            bottom: -15px;
-            animation: dolphinShadow 2.5s ease-in-out infinite;
-        }}
-        @keyframes dolphinBob {{
-            0%, 100% {{ transform: translateY(0); }}
-            50% {{ transform: translateY(-6px); }}
-        }}
-        @keyframes dolphinShadow {{
-            0%, 100% {{ transform: translateX(-50%) scale(1); opacity: 0.4; }}
-            50% {{ transform: translateX(-50%) scale(0.6); opacity: 0.15; }}
-        }}
+        .dolphin-bobbing {{ width: 100%; height: 100%; animation: dolphinBob 2.5s ease-in-out infinite; }}
+        .dolphin-shadow {{ position: absolute; left: 50%; transform: translateX(-50%); width: 120%; height: 25%; background: radial-gradient(ellipse, rgba(0, 30, 80, 0.4), transparent 60%); border-radius: 50%; bottom: -15px; animation: dolphinShadow 2.5s ease-in-out infinite; }}
+        @keyframes dolphinBob {{ 0%, 100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-6px); }} }}
+        @keyframes dolphinShadow {{ 0%, 100% {{ transform: translateX(-50%) scale(1); opacity: 0.4; }} 50% {{ transform: translateX(-50%) scale(0.6); opacity: 0.15; }} }}
         .dolphin-splash {{ position: absolute; bottom: 0px; left: 50%; transform: translateX(-50%); width: 34px; height: 12px; background: radial-gradient(ellipse at center, rgba(255,255,255,0.75), rgba(255,255,255,0) 70%); border-radius: 50%; animation: wakePulse 1.8s ease-in-out infinite; }}
         @keyframes wakePulse {{ 0%, 100% {{ opacity: 0.5; transform: translateX(-50%) scale(0.8); }} 50% {{ opacity: 0.9; transform: translateX(-50%) scale(1.2); }} }}
-        /* Mobile Adjustments for iPhone */
+        
         @media (max-width: 768px) {{
-            #bottom-bar {{
-                min-width: 90vw; /* Takes up 90% of the screen on phones */
-                max-width: 95vw;
-            }}
-            
-            /* Slightly shrink the text so the days don't overlap */
-            .tl {{
-                font-size: 11px;
-            }}
-            .tl.day {{
-                font-size: 18px;
-            }}
-            
-            /* Optional: Make the time text a bit smaller to fit */
-            #time-display {{
-                font-size: 18px;
-            }}
+            #bottom-bar {{ min-width: 90vw; max-width: 95vw; }}
+            .tl {{ font-size: 11px; }}
+            .tl.day {{ font-size: 18px; }}
         }}
     </style>
 </head>
 <body class="{'forecast-mode' if is_forecast else 'live-mode'}">
     <div id="map-container">
         <div id="map"></div>
-        
         {sun_html}
         {moon_html}
-        <div id="loading-overlay">Loading...</div>
         <div id="layer-selector">
             <label class="radio-label"><input type="radio" name="layerMode" value="pure_radar" checked onchange="setLayerMode('pure_radar')">🌤️</label>
             <label class="radio-label"><input type="radio" name="layerMode" value="radar" onchange="setLayerMode('radar')">🌡️</label>
@@ -539,9 +546,13 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
             <div id="time-display">Connecting to NOAA satellites…</div>
             <div id="slider-row">
                 <button id="playBtn">▶</button>
-                <div class="slider-col">
-                    <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0">
-                    <div id="tick-row"></div>
+                <div class="slider-col scrubber-container">
+                    <div id="fixed-playhead"></div>
+                    <div id="moving-track">
+                        <div id="track-line"></div>
+                        <div id="tick-row"></div>
+                    </div>
+                    <input type="range" id="slider" min="0" max="{max(0, len(radar_frames) - 1)}" value="0" step="0.01">
                 </div>
             </div>
         </div>
@@ -554,18 +565,12 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         const lastTs = {last_ts_val};
         let currentMode = 'pure_radar';
         const activeBounds = {MAP_BOUNDS};
-        // 1. Define both sets of coordinates
-        const desktopBounds = [[24.0, -125.0], [50.0, -66.0]]; // Normal full US view
-        const phoneBounds = [[33.69, -87.63], [41.88, -78.89]]; // Chicago to Myrtle Beach
-
-        // 2. Check the screen width (768px is the standard cutoff for phones)
+        const desktopBounds = [[24.0, -125.0], [50.0, -66.0]];
+        const phoneBounds = [[33.69, -87.63], [41.88, -78.89]];
         const isPhone = window.innerWidth <= 768;
-
-        // 3. Choose which bounds to use based on the device
         const viewBounds = isPhone ? phoneBounds : desktopBounds;
         const erieLat = 42.1292, erieLon = -80.0851;
         
-        // Pass Python base64 strings to JS
         const b64Plane = "{plane_b64}"; 
         const b64Dolphin = "{dolphin_b64}";
         
@@ -623,11 +628,8 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
             else {{ const shadowWidth = (1 - fraction) * 100; clipPath = phase <= 0.5 ? `ellipse(${{shadowWidth}}% 100% at 0% 50%)` : `ellipse(${{shadowWidth}}% 100% at 100% 50%)`; }}
             moonShadow.style.clipPath = clipPath; moonShadow.style.webkitClipPath = clipPath;
         }}
-        function drawFrame(index) {{
-            if (!frames || !frames[index]) {{
-                console.warn('drawFrame: no frame at index', index);
-                return;
-            }}
+        function drawFrame(index, skipTrack = false) {{
+            if (!frames || !frames[index]) return;
             primaryLayer.setUrl(frames[index].radarImg || BLANK_PNG);
             if (frames[index].tempImg && frames[index].tempImg.length > 50) {{
                 tempOverlayLayer.setUrl(frames[index].tempImg);
@@ -635,78 +637,122 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
             }}
             timeDisplay.innerText = frames[index].time || '—';
             updateAstronomy(new Date(frames[index].ts || Date.now()));
+            
+            // TIMELINE LOCK: Calculate percentage based on absolute time, not frame index
+            if (!skipTrack && totalFrames > 1 && lastTs > firstTs) {{
+                const currentTs = frames[index].ts;
+                const pct = ((currentTs - firstTs) / (lastTs - firstTs)) * 100;
+                const track = document.getElementById('moving-track');
+                if (track) {{
+                    track.style.transition = 'transform 0.3s linear';
+                    track.style.transform = 'translate(-' + pct + '%, -50%)';
+                }}
+            }}
         }}
+        
         if (totalFrames === 0) {{
             timeDisplay.innerText = "Waiting for data...";
             if (loadingOverlay) loadingOverlay.classList.add('hidden');
         }}
+        
         function setLayerMode(mode) {{
             currentMode = mode;
             if (mode === 'pure_radar') {{ map.removeLayer(tempOverlayLayer); map.removeLayer(tempLabelsGroup); }}
             else if (mode === 'radar') {{ map.removeLayer(tempOverlayLayer); map.addLayer(tempLabelsGroup); }}
             else if (mode === 'temp') {{ map.addLayer(tempOverlayLayer); map.addLayer(tempLabelsGroup); }}
-            drawFrame(slider.value);
+            drawFrame(Math.round(parseFloat(slider.value)));
         }}
+        
         function nextFrame() {{
-            let n = parseInt(slider.value) + 1;
+            let n = Math.round(parseFloat(slider.value)) + 1;
             if (n >= totalFrames) n = 0;
             slider.value = n;
             drawFrame(n);
         }}
+        
         playBtn.onclick = () => {{
             if (isLiveMode) return;
             if (isPlaying) {{
-                clearInterval(timer);
-                timer = null;
-                playBtn.innerHTML = "▶";
-                isPlaying = false;
+                clearInterval(timer); timer = null; playBtn.innerHTML = "▶"; isPlaying = false;
             }} else {{
-                timer = setInterval(nextFrame, 450);
-                playBtn.innerHTML = "⏸";
-                isPlaying = true;
+                slider.value = Math.round(parseFloat(slider.value)); 
+                timer = setInterval(nextFrame, 450); playBtn.innerHTML = "⏸"; isPlaying = true;
             }}
         }};
-        slider.oninput = (e) => {{ if (isLiveMode) return; if (isPlaying) playBtn.click(); drawFrame(e.target.value); }};
+        
+        let lastDrawnFrame = -1;
+        slider.oninput = (e) => {{ 
+            if (isLiveMode) return; 
+            if (isPlaying) playBtn.click(); 
+            
+            const exactVal = parseFloat(e.target.value);
+            const intVal = Math.round(exactVal);
+            
+            // TIMELINE LOCK: Smooth scrubbing matched perfectly to the timestamp scale
+            if (totalFrames > 1 && lastTs > firstTs) {{
+                const lowIndex = Math.floor(exactVal);
+                const highIndex = Math.ceil(exactVal);
+                const remainder = exactVal - lowIndex;
+                
+                const lowTs = frames[lowIndex] ? frames[lowIndex].ts : firstTs;
+                const highTs = frames[highIndex] ? frames[highIndex].ts : lastTs;
+                
+                // Interpolate exact timestamp between frames for smooth sliding
+                const interpolatedTs = lowTs + (highTs - lowTs) * remainder;
+                const pct = ((interpolatedTs - firstTs) / (lastTs - firstTs)) * 100;
+                
+                const track = document.getElementById('moving-track');
+                if (track) {{
+                    track.style.transition = 'none'; 
+                    track.style.transform = 'translate(-' + pct + '%, -50%)';
+                }}
+            }}
+            
+            if (intVal !== lastDrawnFrame && frames[intVal]) {{
+                drawFrame(intVal, true); 
+                lastDrawnFrame = intVal;
+            }}
+        }};
+        
         if (isLiveMode) {{ playBtn.innerHTML = ""; playBtn.disabled = true; slider.disabled = true; }}
 
-        // Build tick labels like the Apple weather slider: 6am · 12pm · Now · 6pm + day names
-        // Build Apple-Weather-style tick row
-        // Build Apple-Weather-style tick row
         (function buildTicks() {{
             if (!tickRow) return;
             const spanMs = lastTs - firstTs;
             if (spanMs <= 0) return;
-
-            const nowTs = Date.now();
-            const nowPct = Math.max(0, Math.min(100, ((nowTs - firstTs) / spanMs) * 100));
-
-            // Minor tick every 15 min, major every 60 min
-            const minorMs = 240 * 60 * 1000;
+            
+            // Step forward exactly 1 hour at a time
+            const minorMs = 60 * 60 * 1000; 
             let t = Math.ceil(firstTs / minorMs) * minorMs;
+            
             while (t <= lastTs) {{
                 const pct = ((t - firstTs) / spanMs) * 100;
                 const d = new Date(t);
-                const h = d.getHours(), m = d.getMinutes();
-                const isMajor = m === 0;
-                const isLabel = m === 0 && h % 6 === 0;
-                const isDay = m === 0 && h === 0;
-
-                // tick line
+                const h = d.getHours();
+                
+                // Draw a minor line every 1 hour, and a major line every 3 hours
+                const isMajor = h % 3 === 0;
                 const tk = document.createElement('div');
                 tk.className = 'tk' + (isMajor ? ' maj' : '');
                 tk.style.left = pct + '%';
-                tk.style.height = isMajor ? '8px' : '5px';
+                tk.style.height = isMajor ? '8px' : '4px'; // Taller line for major hours
                 tickRow.appendChild(tk);
-
-                // label at 6-hour marks
-                if (isLabel) {{
+                
+                // Add a text label every 3 hours
+                if (isMajor) {{
+                    const isDay = h === 0;
                     const tl = document.createElement('div');
                     tl.className = 'tl' + (isDay ? ' day' : '');
                     tl.style.left = pct + '%';
+                    
                     if (isDay) {{
                         tl.textContent = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
                     }} else {{
-                        tl.textContent = h === 12 ? '12pm' : (h < 12 ? h + 'am' : (h-12) + 'pm');
+                        // Convert 24-hour time to standard 12-hour AM/PM time
+                        let displayH = h % 12;
+                        if (displayH === 0) displayH = 12;
+                        const ampm = h < 12 ? 'am' : 'pm';
+                        tl.textContent = displayH + ampm;
                     }}
                     tickRow.appendChild(tl);
                 }}
@@ -716,43 +762,30 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 
         drawFrame(0);
 
-        // --- A380 PLANES (Real-world routes) ---
-        // --- REAL OPEN-SKY PLANES ---
-        // --- REAL OPEN-SKY PLANES ---
-        // Python has already injected the data here, so the iPhone just reads it
         const allPlanesCache = {planes_json}; 
         let planeMarkers = [];
 
-        // This function now uses the data Python already gave it
         function swapRandomPlanes() {{
             if (!allPlanesCache || allPlanesCache.length === 0) return;
-
             planeMarkers.forEach(pm => map.removeLayer(pm.marker));
             planeMarkers = [];
 
-            // --- THE FIX: Filter planes by the current viewable map bounds ---
             const currentBounds = map.getBounds();
             const visiblePlanes = allPlanesCache.filter(plane => {{
-                return currentBounds.contains([plane.lat, plane.lon]);
+                return currentBounds.contains(L.latLng(plane.lat, plane.lon));
             }});
-
-            // If there are planes on screen, pool from those. If not, fallback to the main list.
             const pool = visiblePlanes.length > 0 ? visiblePlanes : allPlanesCache;
-
             const shuffled = [...pool].sort(() => 0.5 - Math.random());
             const selected = shuffled.slice(0, 5);
 
             selected.forEach((plane, idx) => {{
                 const trueHeading = plane.heading;
                 const angle = trueHeading - 65; 
-
                 const innerPlaneHtml = b64Plane
                     ? '<img src="' + b64Plane + '" style="width:100%; height:100%; object-fit:contain; filter:drop-shadow(3px 5px 4px rgba(0,0,0,0.4)); transform: rotate(' + angle + 'deg);" />'
                     : '<svg viewBox="0 0 100 100" style="width:100%;height:100%; transform: rotate(' + angle + 'deg);"><path d="M50,5 C52,5 54,7 54,15 L54,35 L75,45 C78,46 80,48 80,51 C80,54 78,56 75,56 L54,56 L54,75 L65,85 C67,87 67,90 65,92 C63,94 60,94 58,92 L50,82 L42,92 C40,94 37,94 35,92 C33,90 33,87 35,85 L46,75 L46,56 L25,56 C22,56 20,54 20,51 C20,48 22,46 25,45 L46,35 L46,15 C46,7 48,5 50,5 Z" fill="#3b82f6" stroke="#1e40af" stroke-width="1.5" stroke-linejoin="round"/></svg>';
-
                 const mph = Math.round(plane.velocity * 2.23694);
                 const altK = Math.round((plane.altitude * 3.28084) / 1000);
-
                 const planeWrapper = 
                     '<div class="plane-wrapper" id="plane-wrapper-' + idx + '" style="width: 100%; height: 100%; position: relative; display: flex; justify-content: center;">' +
                         '<div style="position: absolute; top: -25px; background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(8px); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.4); font-size: 11px; font-weight: 800; color: #1e293b; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.25); pointer-events: none; z-index: 10;">' +
@@ -761,19 +794,14 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                         '<div class="plane-shadow"></div>' +
                         innerPlaneHtml +
                     '</div>';
-
                 const planeIcon = L.divIcon({{ className: 'plane-icon-container', html: planeWrapper, iconSize: [40, 40], iconAnchor: [20, 20] }});
                 const marker = L.marker([plane.lat, plane.lon], {{ icon: planeIcon, interactive: false, zIndexOffset: 9999 }}).addTo(map);
-
                 planeMarkers.push({{ marker, plane, startTime: Date.now() }});
             }});
         }}
-
-        // Run immediately, then swap every 30 seconds
         swapRandomPlanes();
         setInterval(swapRandomPlanes, 30000);
 
-        // Frame-by-frame physics engine to move the planes continuously
         function animatePlanes() {{
             const now = Date.now();
             planeMarkers.forEach(pm => {{
@@ -788,27 +816,15 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         }}
         setTimeout(animatePlanes, 1000);
 
-       // --- REALISTIC DOLPHINS ---
         const dolphinPositions = [
-            // Gulf of Mexico (West of Florida)
             {{ center: [27.0, -88.0], radiusLat: 1.5, radiusLon: 1.0, cycle: 60000 }},
-                     
-            // Atlantic Ocean (Near Hamilton, Bermuda)
             {{ center: [32.0, -65.5], radiusLat: 1.2, radiusLon: 1.8, cycle: 55000 }},
-            
-            // Pacific Ocean (West of San Diego)
             {{ center: [32.5, -125.5], radiusLat: 2.5, radiusLon: 1.2, cycle: 65000 }},
-            
-            // Atlantic Ocean (East of Central Florida - kept for balance)
             {{ center: [29.0, -78.5], radiusLat: 1.5, radiusLon: 1.0, cycle: 45000 }}
         ];
         const dolphinMarkers = [];
         
         dolphinPositions.forEach((pos, idx) => {{
-            // Dolphin icon: genuine cutout PNG with real alpha transparency. The old
-            // mix-blend-mode:screen was designed for a black-background JPG that was
-            // never actually used, and was washing out/lightening the real cutout.
-            // It's now rendered directly at full, true color.
             const innerDolphinHtml = b64Dolphin 
                 ? `<img src="${{b64Dolphin}}" style="width:100%; height:100%; object-fit:contain; filter:drop-shadow(2px 3px 2px rgba(0,0,0,0.5));" />`
                 : `<svg viewBox="0 0 120 80" style="width:100%;height:100%;filter:drop-shadow(2px 3px 2px rgba(0,0,0,0.3));"><defs><linearGradient id="dolphinBody" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#5a9fd4;stop-opacity:1" /><stop offset="50%" style="stop-color:#4a8fc4;stop-opacity:1" /><stop offset="100%" style="stop-color:#3a7fb4;stop-opacity:1" /></linearGradient><linearGradient id="dolphinBelly" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#e8f4f8;stop-opacity:1" /><stop offset="100%" style="stop-color:#c8e4f0;stop-opacity:1" /></linearGradient></defs><path d="M 15,40 Q 8,32 5,38 Q 8,42 15,40 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><path d="M 15,40 Q 8,48 5,42 Q 8,38 15,40 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><ellipse cx="60" cy="40" rx="45" ry="18" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.5"/><ellipse cx="60" cy="48" rx="38" ry="10" fill="url(#dolphinBelly)" opacity="0.8"/><path d="M 55,22 Q 60,8 68,22 Q 62,20 55,22 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.2"/><path d="M 45,50 Q 42,62 52,58 Q 50,52 45,50 Z" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1"/><ellipse cx="95" cy="38" rx="18" ry="12" fill="url(#dolphinBody)" stroke="#2a6fa4" stroke-width="1.5"/><circle cx="88" cy="35" r="2.5" fill="#1a1a1a"/><circle cx="88.5" cy="34.5" r="1" fill="white"/><path d="M 95,42 Q 100,43 105,42" stroke="#2a6fa4" stroke-width="1" fill="none"/><circle cx="20" cy="50" r="3" fill="white" opacity="0.6"/><circle cx="25" cy="52" r="2" fill="white" opacity="0.5"/><circle cx="15" cy="53" r="2.5" fill="white" opacity="0.4"/></svg>`;
@@ -821,10 +837,8 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                     ${{innerDolphinHtml}}
                 </div>
             </div>`;
-
             const dolphinIcon = L.divIcon({{ className: 'dolphin-container', html: dolphinWrapper, iconSize: [20, 20], iconAnchor: [10, 10] }});
             const marker = L.marker(pos.center, {{ icon: dolphinIcon, interactive: false, zIndexOffset: 800 }}).addTo(map);
-            // Subtract the offset so they start mid-cycle, preventing negative elapsed time
             dolphinMarkers.push({{ marker, pos, startTime: Date.now() - (idx * 15000) }});
         }});
 
@@ -835,38 +849,21 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
                 const angle = t * 2 * Math.PI;
                 const lat = dm.pos.center[0] + dm.pos.radiusLat * Math.sin(angle);
                 const lon = dm.pos.center[1] + dm.pos.radiusLon * Math.cos(angle);
-                const dLat = dm.pos.radiusLat * Math.cos(angle);
-                const dLon = -dm.pos.radiusLon * Math.sin(angle);
-                const headingDeg = 60 - (Math.atan2(dLon, dLat) * 180 / Math.PI);
-                
                 dm.marker.setLatLng([lat, lon]);
-                const wrapper = document.getElementById(`dolphin-wrapper-${{dolphinMarkers.indexOf(dm)}}`);
-                if (wrapper) {{
-                    wrapper.classList.add('loaded');
-                }}
             }});
             requestAnimationFrame(animateDolphins);
         }}
         setTimeout(animateDolphins, 1500);
 
-        // Run immediately without waiting for the unreliable 'load' event
-        // Run immediately without waiting for the unreliable 'load' event
-        // Run immediately without waiting for the unreliable 'load' event
         setTimeout(() => {{
             const overlay = document.getElementById('loading-overlay');
             if (overlay) {{
                 overlay.style.opacity = '0';
                 setTimeout(() => {{ if(overlay) overlay.remove(); }}, 500);
             }}
-            
-            // Auto-start the loop if we have forecast frames
-            // Auto-start the loop if we have forecast frames
-            // Auto-start the loop if we have forecast frames
             if (typeof isLiveMode !== 'undefined' && isLiveMode === false && totalFrames > 1) {{
                 const btn = document.getElementById('playBtn');
-                if (btn && !isPlaying) {{
-                    btn.click();
-                }}
+                if (btn && !isPlaying) {{ btn.click(); }}
             }}
         }}, 800);
     </script>
