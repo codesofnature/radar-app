@@ -142,20 +142,54 @@ def generate_temp_overlay(target_dt, om_data):
         grid_img = Image.fromarray(temp_grid, mode="F")
         large_grid_img = grid_img.resize((RADAR_W, RADAR_H), Image.BICUBIC)
         smooth_temps = np.array(large_grid_img)
-        norm = np.clip((smooth_temps - 20) / 100.0, 0, 1)
-        norm = np.floor(norm * 10) / 10.0
+        t = np.clip(smooth_temps, -60, 120)
         colors = np.zeros((RADAR_H, RADAR_W, 4), dtype=np.uint8)
-        m1, m2, m3, m4 = norm < 0.25, (norm >= 0.25) & (norm < 0.50), (norm >= 0.50) & (norm < 0.75), norm >= 0.75
-        f1, f2, f3, f4 = norm / 0.25, (norm - 0.25) / 0.25, (norm - 0.50) / 0.25, (norm - 0.75) / 0.25
-        colors[m1, 2] = 139 + 116 * f1[m1]
-        colors[m2, 1] = 255 * f2[m2]; colors[m2, 2] = 255 - 255 * f2[m2]
-        colors[m3, 0] = 255 * f3[m3]; colors[m3, 1] = 255 - 115 * f3[m3]
-        colors[m4, 0] = 255 - 116 * f4[m4]; colors[m4, 1] = 140 - 140 * f4[m4]
+
+        m1 = t <= 50
+        m2 = (t > 50) & (t <= 80)
+        m3 = t > 80
+
+        f1 = (t[m1] + 60) / 110.0
+        colors[m1, 0] = 255 - (255 * f1)
+        colors[m1, 1] = 255
+        colors[m1, 2] = 255 - (255 * f1)
+
+        f2 = (t[m2] - 50) / 30.0
+        colors[m2, 0] = 255 * f2
+        colors[m2, 1] = 255 - (255 * f2)
+        colors[m2, 2] = 0
+
+        f3 = (t[m3] - 80) / 40.0
+        colors[m3, 0] = 255 - (127 * f3)
+        colors[m3, 1] = 0
+        colors[m3, 2] = 0
+
         colors[:, :, 3] = 45
-        edge = np.zeros(norm.shape, dtype=bool)
-        edge[1:, :] |= norm[1:, :] != norm[:-1, :]; edge[:-1, :] |= norm[1:, :] != norm[:-1, :]
-        edge[:, 1:] |= norm[:, 1:] != norm[:, :-1]; edge[:, :-1] |= norm[:, 1:] != norm[:, :-1]
-        colors[edge] = [0, 0, 0, 40]
+
+        temp_buckets = np.floor(t / 10.0)
+        edge = np.zeros(t.shape, dtype=bool)
+        
+        # 1-pixel outward check
+        edge[1:, :] |= temp_buckets[1:, :] > temp_buckets[:-1, :]
+        edge[:-1, :] |= temp_buckets[:-1, :] > temp_buckets[1:, :]
+        edge[:, 1:] |= temp_buckets[:, 1:] > temp_buckets[:, :-1]
+        edge[:, :-1] |= temp_buckets[:, :-1] > temp_buckets[:, 1:]
+        
+        # 2-pixel outward check (increases thickness)
+        edge[2:, :] |= temp_buckets[2:, :] > temp_buckets[:-2, :]
+        edge[:-2, :] |= temp_buckets[:-2, :] > temp_buckets[2:, :]
+        edge[:, 2:] |= temp_buckets[:, 2:] > temp_buckets[:, :-2]
+        edge[:, :-2] |= temp_buckets[:, :-2] > temp_buckets[:, 2:]
+
+        # 3-pixel outward check (makes it definitively thick)
+        edge[3:, :] |= temp_buckets[3:, :] > temp_buckets[:-3, :]
+        edge[:-3, :] |= temp_buckets[:-3, :] > temp_buckets[3:, :]
+        edge[:, 3:] |= temp_buckets[:, 3:] > temp_buckets[:, :-3]
+        edge[:, :-3] |= temp_buckets[:, :-3] > temp_buckets[:, 3:]
+        
+        # Keep the native color, but set opacity to 160 (semi-transparent)
+        # (0 is fully invisible, 255 is fully solid)
+        colors[edge, 3] = 160
         final_img = Image.fromarray(colors, mode="RGBA")
         buf = io.BytesIO()
         final_img.save(buf, format="PNG", optimize=True)
@@ -593,13 +627,25 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         let timer = null, isPlaying = false;
         
         function tempToColor(fahrenheit) {{
-            let norm = Math.min(1, Math.max(0, (fahrenheit - 20) / 100.0));
-            norm = Math.floor(norm * 10) / 10.0;
-            let r = 0, g = 0, b = 0;
-            if (norm < 0.25) b = 139 + 116 * (norm / 0.25);
-            else if (norm < 0.50) {{ g = 255 * ((norm - 0.25) / 0.25); b = 255 - 255 * ((norm - 0.25) / 0.25); }}
-            else if (norm < 0.75) {{ r = 255 * ((norm - 0.50) / 0.25); g = 255 - 115 * ((norm - 0.50) / 0.25); }}
-            else {{ r = 255 - 116 * ((norm - 0.75) / 0.25); g = 140 - 140 * ((norm - 0.75) / 0.25); }}
+            let t = Math.max(-60, Math.min(120, fahrenheit));
+            let r, g, b;
+
+            if (t <= 50) {{
+                let f = (t + 60) / 110.0;
+                r = 255 - (255 * f);
+                g = 255;
+                b = 255 - (255 * f);
+            }} else if (t <= 80) {{
+                let f = (t - 50) / 30.0;
+                r = 255 * f;
+                g = 255 - (255 * f);
+                b = 0;
+            }} else {{
+                let f = (t - 80) / 40.0;
+                r = 255 - (127 * f); 
+                g = 0;
+                b = 0;
+            }}
             return `rgb(${{Math.round(r)}}, ${{Math.round(g)}}, ${{Math.round(b)}})`;
         }}
         function updateLabels(gridData) {{
