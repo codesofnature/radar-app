@@ -387,6 +387,10 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
 <!DOCTYPE html>
 <html>
 <head>
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Radar">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.8.0/suncalc.min.js"></script>
@@ -622,6 +626,9 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         </div>
     </div>
     <script>
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.register('/sw.js');
+        }
         let targetY = 0.0;      
         
         // Split the physics into a Head (fast) and a Tail (drags behind)
