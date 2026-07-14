@@ -626,9 +626,9 @@ def generate_map_html(radar_frames, mode="live", include_astronomy=True, include
         </div>
     </div>
     <script>
-        if ('serviceWorker' in navigator) {
+        if ('serviceWorker' in navigator) {{
           navigator.serviceWorker.register('/sw.js');
-        }
+        }}
         let targetY = 0.0;      
         
         // Split the physics into a Head (fast) and a Tail (drags behind)
